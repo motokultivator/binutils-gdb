@@ -271,6 +271,11 @@ case ${gdb_host} in
 		NATDEPFILES="${NATDEPFILES} linux-nat-trad.o \
 		mips-linux-nat.o nat/mips-linux-watch.o"
 		;;
+		nanomips)
+		# Host: Linux/nanoMIPS
+		NATDEPFILES="${NATDEPFILES} linux-nat-trad.o \
+		nanomips-linux-nat.o"
+		;;
 	    or1k)
 		# Host: Linux/OpenRISC
 		NATDEPFILES="${NATDEPFILES} or1k-linux-nat.o"

@@ -436,6 +436,24 @@ msp430-*-elf*)
 	gdb_target_obs="msp430-tdep.o"
 	;;
 
+mt-*-*)
+	# Target: Morpho Technologies ms1 processor
+	gdb_target_obs="mt-tdep.o"
+	;;
+
+nanomips*-*-linux*)
+	# Target: Linux/nanoMIPS
+	gdb_target_obs="nanomips-tdep.o nanomips-linux-tdep.o glibc-tdep.o \
+			solib-svr4.o symfile-mem.o linux-tdep.o"
+	gdb_sim=../sim/mips/libsim.a
+	build_gdbserver=yes
+	;;
+nanomips*-*-*)
+	# Target: nanomips ELF
+	gdb_target_obs="nanomips-tdep.o"
+	gdb_sim=../sim/mips/libsim.a
+	;;
+
 nds32*-*-elf)
 	# Target: AndesTech NDS32 core
 	gdb_target_obs="nds32-tdep.o"

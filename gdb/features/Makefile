@@ -46,6 +46,9 @@
 # List of .dat files to create in ../regformats/
 WHICH = mips-linux mips-dsp-linux \
 	mips64-linux mips64-dsp-linux \
+	nanomips \
+	nanomips-linux nanomips-dsp-linux \
+	nanomips64-linux nanomips64-dsp-linux \
 	nios2-linux \
 	or1k-linux \
 	rs6000/powerpc-32 \
@@ -73,6 +76,8 @@ mips-expedite = r29,pc
 mips-dsp-expedite = r29,pc
 mips64-expedite = r29,pc
 mips64-dsp-expedite = r29,pc
+microblaze-expedite = r1,rpc
+nanomips-linux-expedite = r29,pc
 nios2-linux-expedite = sp,pc
 powerpc-expedite = r1,pc
 s390-linux32-expedite = r14,r15,pswa
@@ -105,6 +110,11 @@ XMLTOC = \
 	mips-linux.xml \
 	mips64-dsp-linux.xml \
 	mips64-linux.xml \
+	nanomips.xml \
+	nanomips-linux.xml \
+	nanomips-dsp-linux.xml \
+	nanomips64-linux.xml \
+	nanomips64-dsp-linux.xml \
 	nds32.xml \
 	nios2.xml \
 	or1k.xml \
