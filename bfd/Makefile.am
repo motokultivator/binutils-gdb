@@ -540,6 +540,7 @@ BFD64_BACKENDS = \
 	coff64-rs6000.lo \
 	elf32-ia64.lo \
 	elf32-mips.lo \
+	elfp32-mips.lo \
 	elf32-score.lo \
 	elf32-score7.lo \
 	elf64-alpha.lo \
@@ -550,6 +551,7 @@ BFD64_BACKENDS = \
 	elfxx-ia64.lo \
 	elfn32-mips.lo \
 	elf64-mips.lo \
+	elfp64-mips.lo \
 	elfxx-mips.lo \
 	elf64-mmix.lo \
 	elf64-nfp.lo \
@@ -581,6 +583,7 @@ BFD64_BACKENDS_CFILES = \
 	coff-x86_64.c \
 	coff64-rs6000.c \
 	elf32-mips.c \
+	elfp32-mips.c \
 	elf32-score.c \
 	elf32-score7.c \
 	elf64-alpha.c \
@@ -588,6 +591,7 @@ BFD64_BACKENDS_CFILES = \
 	elf64-hppa.c \
 	elf64-ia64-vms.c \
 	elf64-mips.c \
+	elfp64-mips.c \
 	elf64-mmix.c \
 	elf64-nfp.c \
 	elf64-ppc.c \

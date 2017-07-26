@@ -190,11 +190,13 @@ DESCRIPTION
 .#define bfd_mach_mipsisa32r3		34
 .#define bfd_mach_mipsisa32r5		36
 .#define bfd_mach_mipsisa32r6		37
+ #define bfd_mach_nanomipsisa32r6	38
 .#define bfd_mach_mipsisa64		64
 .#define bfd_mach_mipsisa64r2		65
 .#define bfd_mach_mipsisa64r3		66
 .#define bfd_mach_mipsisa64r5		68
 .#define bfd_mach_mipsisa64r6		69
+ #define bfd_mach_nanomipsisa64r6	70
 .#define bfd_mach_mips_micromips	96
 .  bfd_arch_i386,      {* Intel 386.  *}
 .#define bfd_mach_i386_intel_syntax	(1 << 0)
@@ -656,6 +658,7 @@ extern const bfd_arch_info_type bfd_moxie_arch;
 extern const bfd_arch_info_type bfd_ft32_arch;
 extern const bfd_arch_info_type bfd_msp430_arch;
 extern const bfd_arch_info_type bfd_mt_arch;
+extern const bfd_arch_info_type bfd_nanomips_arch;
 extern const bfd_arch_info_type bfd_nds32_arch;
 extern const bfd_arch_info_type bfd_nfp_arch;
 extern const bfd_arch_info_type bfd_nios2_arch;
@@ -745,6 +748,7 @@ static const bfd_arch_info_type * const bfd_archures_list[] =
     &bfd_ft32_arch,
     &bfd_msp430_arch,
     &bfd_mt_arch,
+    &bfd_nanomips_arch,
     &bfd_nds32_arch,
     &bfd_nfp_arch,
     &bfd_nios2_arch,
