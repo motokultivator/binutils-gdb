@@ -1387,7 +1387,6 @@ mips_print_save_restore (struct disassemble_info *info, unsigned int amask,
 	       mips_gpr_names[7]);
 }
 
-
 /* Print operand OPERAND of OPCODE, using STATE to track inter-operand state.
    UVAL is the encoding of the operand (shifted into bit 0) and BASE_PC is
    the base address for OP_PCREL operands.  */
@@ -1758,7 +1757,7 @@ validate_insn_args (const struct mips_opcode *opcode,
 		case OP_NON_ZERO_REG:
 		  {
 		    if (uval == 0)
-		      return false;
+		      return FALSE;
 		  }
 		break;
 
@@ -2090,7 +2089,7 @@ print_mips16_insn_arg (struct disassemble_info *info,
       ext_size = 0;
       if (use_extend)
 	{
-	  ext_operand = decode_mips16_operand (type, true);
+	  ext_operand = decode_mips16_operand (type, TRUE);
 	  if (ext_operand != operand
 	      || (operand->type == OP_INT && operand->lsb == 0
 		  && mips_opcode_32bit_p (opcode)))
@@ -2187,7 +2186,7 @@ enum match_kind
 /* Disassemble mips16 instructions.  */
 
 static int
-print_insn_mips16 (bfd_vma memaddr, struct disassemble_info *info)
+print_insn_mips16 (bfd_vma memaddr_base, struct disassemble_info *info)
 {
   const fprintf_ftype infprintf = info->fprintf_func;
   int status;
@@ -2530,7 +2529,7 @@ print_insn_micromips (bfd_vma memaddr, struct disassemble_info *info)
    define data).  Otherwise, return 0.  */
 
 static bool
-is_compressed_mode_p (struct disassemble_info *info, bool micromips_p)
+is_compressed_mode_p (struct disassemble_info *info, bfd_boolean micromips_p)
 {
   int i;
   int l;

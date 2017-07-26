@@ -1221,6 +1221,7 @@ case $cpu-$vendor in
 			| moxie \
 			| mt \
 			| msp430 \
+			| nanomips | nanomipseb \
 			| nds32 | nds32le | nds32be \
 			| nfp \
 			| nios | nios2 | nios2eb | nios2el \

@@ -537,7 +537,7 @@ DESCRIPTION
 .#define bfd_mach_nios2		0
 .#define bfd_mach_nios2r1	1
 .#define bfd_mach_nios2r2	2
-.  bfd_arch_visium,    {* Visium.  *}
+.  bfd_arch_visium,	{* Visium *}
 .#define bfd_mach_visium	1
 .  bfd_arch_wasm32,    {* WebAssembly.  *}
 .#define bfd_mach_wasm32	1
@@ -559,6 +559,9 @@ DESCRIPTION
 .  bfd_arch_loongarch,       {* LoongArch *}
 .#define bfd_mach_loongarch32	1
 .#define bfd_mach_loongarch64	2
+.  bfd_arch_nanomips,      {* nanoMIPSrX *}
+.#define bfd_mach_nanomipsisa32r6       32
+.#define bfd_mach_nanomipsisa64r6       64
 .  bfd_arch_last
 .  };
 */
@@ -660,6 +663,7 @@ extern const bfd_arch_info_type bfd_moxie_arch;
 extern const bfd_arch_info_type bfd_ft32_arch;
 extern const bfd_arch_info_type bfd_msp430_arch;
 extern const bfd_arch_info_type bfd_mt_arch;
+extern const bfd_arch_info_type bfd_nanomips_arch;
 extern const bfd_arch_info_type bfd_nds32_arch;
 extern const bfd_arch_info_type bfd_nfp_arch;
 extern const bfd_arch_info_type bfd_nios2_arch;
@@ -750,6 +754,7 @@ static const bfd_arch_info_type * const bfd_archures_list[] =
     &bfd_ft32_arch,
     &bfd_msp430_arch,
     &bfd_mt_arch,
+    &bfd_nanomips_arch,
     &bfd_nds32_arch,
     &bfd_nfp_arch,
     &bfd_nios2_arch,

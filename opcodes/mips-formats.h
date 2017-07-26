@@ -41,7 +41,7 @@
 #define BIT(SIZE, LSB, BIAS) \
   { \
     static const struct mips_int_operand op = { \
-      { OP_INT, SIZE, LSB }, (1 << (SIZE)) - 1, BIAS, 0, true \
+      { OP_INT, SIZE, LSB }, (1 << (SIZE)) - 1, BIAS, 0, TRUE \
     }; \
     return &op.root; \
   }
@@ -117,7 +117,7 @@
   { \
     static const struct mips_pcrel_operand op = { \
       { { OP_PCREL, SIZE, LSB }, \
-	(1 << ((SIZE) - (IS_SIGNED))) - 1, 0, SHIFT, true }, \
+	(1 << ((SIZE) - (IS_SIGNED))) - 1, 0, SHIFT, TRUE }, \
       ALIGN_LOG2, INCLUDE_ISA_BIT, FLIP_ISA_BIT \
     }; \
     return &op.root.root; \

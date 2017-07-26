@@ -207,6 +207,12 @@ TARGET32_LIBOPCODES_CFILES = \
 	mep-opc.c \
 	metag-dis.c \
 	microblaze-dis.c \
+	micromips-opc.c \
+	mips-dis.c \
+	mips-opc.c \
+	mips16-opc.c \
+	mmix-dis.c \
+	mmix-opc.c \
 	moxie-dis.c \
 	moxie-opc.c \
 	msp430-decode.c \
@@ -216,6 +222,8 @@ TARGET32_LIBOPCODES_CFILES = \
 	mt-dis.c \
 	mt-ibld.c \
 	mt-opc.c \
+	nanomips-dis.c \
+	nanomips-opc.c \
 	nds32-asm.c \
 	nds32-dis.c \
 	nios2-dis.c \
