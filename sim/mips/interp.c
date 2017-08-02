@@ -140,6 +140,7 @@ static SIM_ADDR lsipmon_monitor_base = 0xBFC00200;
 
 static SIM_RC sim_firmware_command (SIM_DESC sd, char* arg);
 
+int is_nanomips = 0;
 #define MEM_SIZE (8 << 20)	/* 8 MBytes */
 
 
@@ -672,10 +673,13 @@ sim_open (SIM_OPEN_KIND kind, host_callback *cb,
 	  cpu->register_widths[rn] = WITH_TARGET_FLOATING_POINT_BITSIZE;
 	else if ((rn >= 33) && (rn <= 37))
 	  cpu->register_widths[rn] = WITH_TARGET_WORD_BITSIZE;
+	else if ((rn >= 70) && (rn <= 78))
+	  cpu->register_widths[rn] = WITH_TARGET_WORD_BITSIZE;
 	else if ((rn == SRIDX)
 		 || (rn == FCR0IDX)
 		 || (rn == FCR31IDX)
-		 || ((rn >= 72) && (rn <= 89)))
+		 || (rn == DSPCRIDX)
+		 || ((rn >= 80) && (rn <= 89)))
 	  cpu->register_widths[rn] = 32;
 	else
 	  cpu->register_widths[rn] = 0;
@@ -1200,7 +1204,7 @@ sim_monitor (SIM_DESC sd,
     case 6: /* int open(char *path,int flags) */
       {
 	char *path = fetch_str (sd, A0);
-	V0 = sim_io_open (sd, path, (int)A1);
+	SET_RV0 (sim_io_open (sd, path, (int)A1));
 	free (path);
 	break;
       }
@@ -1210,7 +1214,7 @@ sim_monitor (SIM_DESC sd,
 	int fd = A0;
 	int nr = A2;
 	char *buf = zalloc (nr);
-	V0 = sim_io_read (sd, fd, buf, nr);
+	SET_RV0 (sim_io_read (sd, fd, buf, nr));
 	sim_write (sd, A1, (unsigned char *)buf, nr);
 	free (buf);
       }
@@ -1222,7 +1226,7 @@ sim_monitor (SIM_DESC sd,
 	int nr = A2;
 	char *buf = zalloc (nr);
 	sim_read (sd, A1, (unsigned char *)buf, nr);
-	V0 = sim_io_write (sd, fd, buf, nr);
+	SET_RV0 (sim_io_write (sd, fd, buf, nr));
 	if (fd == 1)
 	    sim_io_flush_stdout (sd);
 	else if (fd == 2)
@@ -1233,14 +1237,14 @@ sim_monitor (SIM_DESC sd,
 
     case 10: /* int close(int file) */
       {
-	V0 = sim_io_close (sd, (int)A0);
+	SET_RV0 (sim_io_close (sd, (int)A0));
 	break;
       }
 
     case 2:  /* Densan monitor: char inbyte(int waitflag) */
       {
 	if (A0 == 0)	/* waitflag == NOWAIT */
-	  V0 = (unsigned_word)-1;
+	    SET_RV0 ((unsigned_word)-1);
       }
      /* Drop through to case 11 */
 
@@ -1252,10 +1256,10 @@ sim_monitor (SIM_DESC sd,
         if (sim_io_read_stdin (sd, &tmp, sizeof(char)) != sizeof(char))
 	  {
 	    sim_io_error(sd,"Invalid return from character read");
-	    V0 = (unsigned_word)-1;
+	    SET_RV0 ((unsigned_word)-1);
 	  }
         else
-	  V0 = (unsigned_word)tmp;
+	    SET_RV0 ((unsigned_word)tmp);
 	break;
       }
 
@@ -1531,21 +1535,26 @@ store_word (SIM_DESC sd,
 	    uword64 vaddr,
 	    signed_word val)
 {
-  address_word paddr = vaddr;
+  address_word paddr;
+  int uncached;
 
   if ((vaddr & 3) != 0)
     SignalExceptionAddressStore ();
   else
     {
-      const uword64 mask = 7;
-      uword64 memval;
-      unsigned int byte;
+      if (AddressTranslation (vaddr, isDATA, isSTORE, &paddr, &uncached,
+			      isTARGET, isREAL))
+	{
+	  const uword64 mask = 7;
+	  uword64 memval;
+	  unsigned int byte;
 
-      paddr = (paddr & ~mask) | ((paddr & mask) ^ (ReverseEndian << 2));
-      byte = (vaddr & mask) ^ (BigEndianCPU << 2);
-      memval = ((uword64) val) << (8 * byte);
-      StoreMemory (AccessLength_WORD, memval, 0, paddr, vaddr,
-		   isREAL);
+	  paddr = (paddr & ~mask) | ((paddr & mask) ^ (ReverseEndian << 2));
+	  byte = (vaddr & mask) ^ (BigEndianCPU << 2);
+	  memval = ((uword64) val) << (8 * byte);
+	  StoreMemory (uncached, AccessLength_WORD, memval, 0, paddr, vaddr,
+		       isREAL);
+	}
     }
 }
 
@@ -1563,18 +1572,24 @@ load_word (SIM_DESC sd,
     }
   else
     {
-      address_word paddr = vaddr;
-      const uword64 mask = 0x7;
-      const unsigned int reverse = ReverseEndian ? 1 : 0;
-      const unsigned int bigend = BigEndianCPU ? 1 : 0;
-      uword64 memval;
-      unsigned int byte;
+      address_word paddr;
+      int uncached;
 
-      paddr = (paddr & ~mask) | ((paddr & mask) ^ (reverse << 2));
-      LoadMemory (&memval, NULL, AccessLength_WORD, paddr, vaddr, isDATA,
-		  isREAL);
-      byte = (vaddr & mask) ^ (bigend << 2);
-      return EXTEND32 (memval >> (8 * byte));
+      if (AddressTranslation (vaddr, isDATA, isLOAD, &paddr, &uncached,
+			      isTARGET, isREAL))
+	{
+	  const uword64 mask = 0x7;
+	  const unsigned int reverse = ReverseEndian ? 1 : 0;
+	  const unsigned int bigend = BigEndianCPU ? 1 : 0;
+	  uword64 memval;
+	  unsigned int byte;
+
+	  paddr = (paddr & ~mask) | ((paddr & mask) ^ (reverse << 2));
+	  LoadMemory (&memval,NULL,uncached, AccessLength_WORD, paddr, vaddr,
+			       isDATA, isREAL);
+	  byte = (vaddr & mask) ^ (bigend << 2);
+	  return EXTEND32 (memval >> (8 * byte));
+	}
     }
 
   return 0;

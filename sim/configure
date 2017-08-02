@@ -15110,6 +15110,14 @@ fi
       sim_enable_arch_mips=true
       sim_igen=yes
       ;;
+    nanomips*-*-*)
+
+      sim_arch=mips
+      subdirs="$subdirs mips"
+
+      sim_igen=yes
+        ;;
+
   esac
 
 

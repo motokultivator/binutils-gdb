@@ -260,6 +260,8 @@ struct _sim_cpu {
 
 
   /* The following are internal simulator state variables: */
+#define CIA_GET(CPU) ((CPU)->registers[PCIDX] + 0)
+#define CIA_SET(CPU,CIA) ((CPU)->registers[PCIDX] = (CIA))
   address_word dspc;  /* delay-slot PC */
 #define DSPC ((CPU)->dspc)
 
@@ -314,9 +316,9 @@ struct _sim_cpu {
 #define LAST_EMBED_REGNUM (96)
 #define NUM_REGS (LAST_EMBED_REGNUM + 1)
 
-#define FP0_REGNUM 38           /* Floating point register 0 (single float) */
-#define FCRCS_REGNUM 70         /* FP control/status */
-#define FCRIR_REGNUM 71         /* FP implementation/revision */
+#define FP0_REGNUM 36           /* Floating point register 0 (single float) */
+#define FCRCS_REGNUM 68         /* FP control/status */
+#define FCRIR_REGNUM 69         /* FP implementation/revision */
 #endif
 
 
@@ -332,16 +334,16 @@ struct _sim_cpu {
 #define GPR     (&REGISTERS[0])
 #define GPR_SET(N,VAL) (REGISTERS[(N)] = (VAL))
 
-#define LO      (REGISTERS[33])
-#define HI      (REGISTERS[34])
-#define PCIDX	37
+#define HI      (REGISTERS[70])
+#define LO      (REGISTERS[71])
+#define PCIDX	(is_nanomips?32:35)
 #define PC      (REGISTERS[PCIDX])
-#define CAUSE   (REGISTERS[36])
+#define CAUSE   (REGISTERS[34])
 #define SRIDX   (32)
 #define SR      (REGISTERS[SRIDX])      /* CPU status register */
-#define FCR0IDX  (71)
+#define FCR0IDX  (69)
 #define FCR0    (REGISTERS[FCR0IDX])    /* really a 32bit register */
-#define FCR31IDX (70)
+#define FCR31IDX (68)
 #define FCR31   (REGISTERS[FCR31IDX])   /* really a 32bit register */
 #define FCSR    (FCR31)
 #define Debug	(REGISTERS[86])
@@ -349,19 +351,19 @@ struct _sim_cpu {
 #define EPC	(REGISTERS[88])
 #define ACX	(REGISTERS[89])
 
-#define AC0LOIDX	(33)	/* Must be the same register as LO */
-#define AC0HIIDX	(34)	/* Must be the same register as HI */
-#define AC1LOIDX	(90)
-#define AC1HIIDX	(91)
-#define AC2LOIDX	(92)
-#define AC2HIIDX	(93)
-#define AC3LOIDX	(94)
-#define AC3HIIDX	(95)
+#define AC0HIIDX	(70)	/* Must be the same register as HI */
+#define AC0LOIDX	(71)	/* Must be the same register as LO */
+#define AC1HIIDX	(72)
+#define AC1LOIDX	(73)
+#define AC2HIIDX	(74)
+#define AC2LOIDX	(75)
+#define AC3HIIDX	(76)
+#define AC3LOIDX	(77)
 
 #define DSPLO(N)	(REGISTERS[DSPLO_REGNUM[N]])
 #define DSPHI(N)	(REGISTERS[DSPHI_REGNUM[N]])
 
-#define DSPCRIDX	(96)	/* DSP control register */
+#define DSPCRIDX	(79)	/* DSP control register */
 #define DSPCR		(REGISTERS[DSPCRIDX])
 
 #define DSPCR_POS_SHIFT		(0)
@@ -416,6 +418,8 @@ struct _sim_cpu {
 #define A3      (REGISTERS[7])
 #define T8IDX   24
 #define T8	(REGISTERS[T8IDX])
+#define GPIDX   28
+#define GP      (REGISTERS[GPIDX])
 #define SPIDX   29
 #define SP      (REGISTERS[SPIDX])
 #define RAIDX   31
@@ -429,6 +433,7 @@ struct _sim_cpu {
   unsigned_word cop0_gpr[NR_COP0_GPR];
 #define COP0_GPR	((CPU)->cop0_gpr)
 #define COP0_BADVADDR	(COP0_GPR[8])
+#define COP0_COUNT (COP0_GPR[9])
 
   /* While space is allocated for the floating point registers in the
      main registers array, they are stored separatly.  This is because
@@ -471,6 +476,17 @@ struct _sim_cpu {
 
   sim_cpu_base base;
 };
+
+extern int is_nanomips;
+
+#define SET_RV0(VAL)             \
+  do {                 \
+    if (is_nanomips)             \
+      A0 = VAL;                \
+    else               \
+      V0 = VAL;                \
+  } while (0)
+
 
 extern void mips_sim_close (SIM_DESC sd, int quitting);
 #define SIM_CLOSE_HOOK(...) mips_sim_close (__VA_ARGS__)
@@ -635,13 +651,16 @@ enum ExceptionCause {
    is used by gdb for break-points.  NOTE: Care must be taken, since 
    this value may be used in later revisions of the MIPS ISA. */
 #define HALT_INSTRUCTION_MASK   (0x03FFFFC0)
+#define HALT_INSTRUCTION_MASK_NANOMIPS (0x0007FFFF)
 
 #define HALT_INSTRUCTION        (0x03ff000d)
 #define HALT_INSTRUCTION2       (0x0000ffcd)
+#define HALT_INSTRUCTION_NANOMIPS      (0x001003FF)
 
 
 #define BREAKPOINT_INSTRUCTION  (0x0005000d)
 #define BREAKPOINT_INSTRUCTION2 (0x0000014d)
+#define BREAKPOINT_INSTRUCTION_NANOMIPS  (0x00101400)
 
 
 
@@ -720,10 +739,54 @@ void store_fcr (SIM_STATE, int fcr, unsigned_word value);
 void test_fcsr (SIM_STATE);
 #define TestFCSR() test_fcsr (SIM_ARGS)
 
+/* FPU operations.  */
+/* Non-signalling */
+#define FP_R6CMP_AF  0x0
+#define FP_R6CMP_EQ  0x2
+#define FP_R6CMP_LE  0x6
+#define FP_R6CMP_LT  0x4
+#define FP_R6CMP_NE  0x13
+#define FP_R6CMP_OR  0x11
+#define FP_R6CMP_UEQ 0x3
+#define FP_R6CMP_ULE 0x7
+#define FP_R6CMP_ULT 0x5
+#define FP_R6CMP_UN  0x1
+#define FP_R6CMP_UNE 0x12
+
+/* Signalling */
+#define FP_R6CMP_SAF  0x8
+#define FP_R6CMP_SEQ  0xa
+#define FP_R6CMP_SLE  0xe
+#define FP_R6CMP_SLT  0xc
+#define FP_R6CMP_SNE  0x1b
+#define FP_R6CMP_SOR  0x19
+#define FP_R6CMP_SUEQ 0xb
+#define FP_R6CMP_SULE 0xf
+#define FP_R6CMP_SULT 0xd
+#define FP_R6CMP_SUN  0x9
+#define FP_R6CMP_SUNE 0x1a
+
+/* FPU Class */
+#define FP_R6CLASS_SNAN    (1<<0)
+#define FP_R6CLASS_QNAN    (1<<1)
+#define FP_R6CLASS_NEGINF  (1<<2)
+#define FP_R6CLASS_NEGNORM (1<<3)
+#define FP_R6CLASS_NEGSUB  (1<<4)
+#define FP_R6CLASS_NEGZERO (1<<5)
+#define FP_R6CLASS_POSINF  (1<<6)
+#define FP_R6CLASS_POSNORM (1<<7)
+#define FP_R6CLASS_POSSUB  (1<<8)
+#define FP_R6CLASS_POSZERO (1<<9)
 
 /* FPU operations.  */
 void fp_cmp (SIM_STATE, unsigned64 op1, unsigned64 op2, FP_formats fmt, int abs, int cond, int cc);
 #define Compare(op1,op2,fmt,cond,cc) fp_cmp(SIM_ARGS, op1, op2, fmt, 0, cond, cc)
+unsigned64 fp_r6_cmp (SIM_STATE, unsigned64 op1, unsigned64 op2, FP_formats fmt, int cond);
+#define R6Compare(op1,op2,fmt,cond) fp_r6_cmp(SIM_ARGS, op1, op2, fmt, cond)
+unsigned64 fp_classify(SIM_STATE, unsigned64 op, FP_formats fmt);
+#define Classify(op, fmt) fp_classify(SIM_ARGS, op, fmt)
+int fp_rint(SIM_STATE, unsigned64 op, unsigned64 *ans, FP_formats fmt);
+#define RoundToIntegralExact(op, ans, fmt) fp_rint(SIM_ARGS, op, ans, fmt)
 unsigned64 fp_abs (SIM_STATE, unsigned64 op, FP_formats fmt);
 #define AbsoluteValue(op,fmt) fp_abs(SIM_ARGS, op, fmt)
 unsigned64 fp_neg (SIM_STATE, unsigned64 op, FP_formats fmt);
@@ -736,6 +799,14 @@ unsigned64 fp_mul (SIM_STATE, unsigned64 op1, unsigned64 op2, FP_formats fmt);
 #define Multiply(op1,op2,fmt) fp_mul(SIM_ARGS, op1, op2, fmt)
 unsigned64 fp_div (SIM_STATE, unsigned64 op1, unsigned64 op2, FP_formats fmt);
 #define Divide(op1,op2,fmt) fp_div(SIM_ARGS, op1, op2, fmt)
+unsigned64 fp_min (SIM_STATE, unsigned64 op1, unsigned64 op2, FP_formats fmt);
+#define Min(op1,op2,fmt) fp_min(SIM_ARGS, op1, op2, fmt)
+unsigned64 fp_max (SIM_STATE, unsigned64 op1, unsigned64 op2, FP_formats fmt);
+#define Max(op1,op2,fmt) fp_max(SIM_ARGS, op1, op2, fmt)
+unsigned64 fp_mina (SIM_STATE, unsigned64 op1, unsigned64 op2, FP_formats fmt);
+#define MinA(op1,op2,fmt) fp_mina(SIM_ARGS, op1, op2, fmt)
+unsigned64 fp_maxa (SIM_STATE, unsigned64 op1, unsigned64 op2, FP_formats fmt);
+#define MaxA(op1,op2,fmt) fp_maxa(SIM_ARGS, op1, op2, fmt)
 unsigned64 fp_recip (SIM_STATE, unsigned64 op, FP_formats fmt);
 #define Recip(op,fmt) fp_recip(SIM_ARGS, op, fmt)
 unsigned64 fp_sqrt (SIM_STATE, unsigned64 op, FP_formats fmt);
@@ -743,21 +814,27 @@ unsigned64 fp_sqrt (SIM_STATE, unsigned64 op, FP_formats fmt);
 unsigned64 fp_rsqrt (SIM_STATE, unsigned64 op, FP_formats fmt);
 #define RSquareRoot(op,fmt) fp_rsqrt(SIM_ARGS, op, fmt)
 unsigned64 fp_madd (SIM_STATE, unsigned64 op1, unsigned64 op2,
-		    unsigned64 op3, FP_formats fmt);
+        unsigned64 op3, FP_formats fmt);
+#define FusedMultiplyAdd(op1,op2,op3,fmt) fp_fmadd(SIM_ARGS, op1, op2, op3, fmt)
+unsigned64 fp_fmadd (SIM_STATE, unsigned64 op1, unsigned64 op2,
+                     unsigned64 op3, FP_formats fmt);
+#define FusedMultiplySub(op1,op2,op3,fmt) fp_fmsub(SIM_ARGS, op1, op2, op3, fmt)
+unsigned64 fp_fmsub (SIM_STATE, unsigned64 op1, unsigned64 op2,
+                     unsigned64 op3, FP_formats fmt);
 #define MultiplyAdd(op1,op2,op3,fmt) fp_madd(SIM_ARGS, op1, op2, op3, fmt)
 unsigned64 fp_msub (SIM_STATE, unsigned64 op1, unsigned64 op2,
-		    unsigned64 op3, FP_formats fmt);
+        unsigned64 op3, FP_formats fmt);
 #define MultiplySub(op1,op2,op3,fmt) fp_msub(SIM_ARGS, op1, op2, op3, fmt)
 unsigned64 fp_nmadd (SIM_STATE, unsigned64 op1, unsigned64 op2,
-		     unsigned64 op3, FP_formats fmt);
+         unsigned64 op3, FP_formats fmt);
 #define NegMultiplyAdd(op1,op2,op3,fmt) fp_nmadd(SIM_ARGS, op1, op2, op3, fmt)
 unsigned64 fp_nmsub (SIM_STATE, unsigned64 op1, unsigned64 op2,
-		     unsigned64 op3, FP_formats fmt);
+         unsigned64 op3, FP_formats fmt);
 #define NegMultiplySub(op1,op2,op3,fmt) fp_nmsub(SIM_ARGS, op1, op2, op3, fmt)
 unsigned64 convert (SIM_STATE, int rm, unsigned64 op, FP_formats from, FP_formats to);
 #define Convert(rm,op,from,to) convert (SIM_ARGS, rm, op, from, to)
 unsigned64 convert_ps (SIM_STATE, int rm, unsigned64 op, FP_formats from,
-		       FP_formats to);
+           FP_formats to);
 #define ConvertPS(rm,op,from,to) convert_ps (SIM_ARGS, rm, op, from, to)
 
 
@@ -890,6 +967,12 @@ unsigned64 mdmx_shuffle (SIM_STATE, int, unsigned64, unsigned64);
 /* The following are generic to all versions of the MIPS architecture
    to date: */
 
+/* Memory Access Types (for CCA): */
+#define Uncached                (0)
+#define CachedNoncoherent       (1)
+#define CachedCoherent          (2)
+#define Cached                  (3)
+
 #define isINSTRUCTION   (1 == 0) /* FALSE */
 #define isDATA          (1 == 1) /* TRUE */
 #define isLOAD          (1 == 0) /* FALSE */
@@ -916,13 +999,17 @@ unsigned64 mdmx_shuffle (SIM_STATE, int, unsigned64, unsigned64);
 		    ? AccessLength_DOUBLEWORD /*7*/ \
 		    : AccessLength_WORD /*3*/)
 
+INLINE_SIM_MAIN (int) address_translation (SIM_DESC sd, sim_cpu *, address_word cia, address_word vAddr, int IorD, int LorS, address_word *pAddr, int *CCA, int raw);
+#define AddressTranslation(vAddr,IorD,LorS,pAddr,CCA,host,raw) \
+address_translation (SD, CPU, cia, vAddr, IorD, LorS, pAddr, CCA, raw)
+
 INLINE_SIM_MAIN (void) load_memory (SIM_DESC sd, sim_cpu *cpu, address_word cia, uword64* memvalp, uword64* memval1p, int CCA, unsigned int AccessLength, address_word pAddr, address_word vAddr, int IorD);
-#define LoadMemory(memvalp,memval1p,AccessLength,pAddr,vAddr,IorD,raw) \
-load_memory (SD, CPU, cia, memvalp, memval1p, 0, AccessLength, pAddr, vAddr, IorD)
+#define LoadMemory(memvalp,memval1p,CCA,AccessLength,pAddr,vAddr,IorD,raw) \
+load_memory (SD, CPU, cia, memvalp, memval1p, CCA, AccessLength, pAddr, vAddr, IorD)
 
 INLINE_SIM_MAIN (void) store_memory (SIM_DESC sd, sim_cpu *cpu, address_word cia, int CCA, unsigned int AccessLength, uword64 MemElem, uword64 MemElem1, address_word pAddr, address_word vAddr);
-#define StoreMemory(AccessLength,MemElem,MemElem1,pAddr,vAddr,raw) \
-store_memory (SD, CPU, cia, 0, AccessLength, MemElem, MemElem1, pAddr, vAddr)
+#define StoreMemory(CCA,AccessLength,MemElem,MemElem1,pAddr,vAddr,raw) \
+store_memory (SD, CPU, cia, CCA, AccessLength, MemElem, MemElem1, pAddr, vAddr)
 
 INLINE_SIM_MAIN (void) cache_op (SIM_DESC sd, sim_cpu *cpu, address_word cia, int op, address_word pAddr, address_word vAddr, unsigned int instruction);
 #define CacheOp(op,pAddr,vAddr,instruction) \
@@ -931,6 +1018,10 @@ cache_op (SD, CPU, cia, op, pAddr, vAddr, instruction)
 INLINE_SIM_MAIN (void) sync_operation (SIM_DESC sd, sim_cpu *cpu, address_word cia, int stype);
 #define SyncOperation(stype) \
 sync_operation (SD, CPU, cia, (stype))
+
+INLINE_SIM_MAIN (void) prefetch (SIM_DESC sd, sim_cpu *cpu, address_word cia, int CCA, address_word pAddr, address_word vAddr, int DATA, int hint);
+#define Prefetch(CCA,pAddr,vAddr,DATA,hint) \
+prefetch (SD, CPU, cia, CCA, pAddr, vAddr, DATA, hint)
 
 void unpredictable_action (sim_cpu *cpu, address_word cia);
 #define NotWordValue(val)	not_word_value (SD_, (val))
@@ -953,6 +1044,16 @@ INLINE_SIM_MAIN (unsigned16) ifetch16 (SIM_DESC sd, sim_cpu *cpu, address_word c
 #define MICROMIPS_DELAYSLOT_SIZE_16 2
 #define MICROMIPS_DELAYSLOT_SIZE_32 4
 
+#define IMEM32_NANOMIPS(CIA) \
+  (ifetch16 (SD, CPU, (CIA), (CIA)) << 16 | ifetch16 (SD, CPU, (CIA + 2), \
+                  (CIA + 2)))
+#define IMEM16_NANOMIPS(CIA) ifetch16 (SD, CPU, (CIA), ((CIA)))
+
+
+#define NANOMIPS_MAJOR_OPCODE_3_5(INSN) ((INSN & 0x1c00) >> 10)
+
+#define NANOMIPS_DELAYSLOT_SIZE_ANY 0
+
 extern int isa_mode;
 
 #define ISA_MODE_MIPS32 0
@@ -972,6 +1073,10 @@ extern FILE *tracefh;
 extern int DSPLO_REGNUM[4];
 extern int DSPHI_REGNUM[4];
 
+/* NMS Flag */
+extern int nms_flag;
+extern int is_nms_flag_set;
+
 INLINE_SIM_MAIN (void) pending_tick (SIM_DESC sd, sim_cpu *cpu, address_word cia);
 extern SIM_CORE_SIGNAL_FN mips_core_signal;
 
@@ -986,10 +1091,16 @@ void mips_cpu_exception_suspend(SIM_DESC sd, sim_cpu* cpu, int exception);
 void mips_cpu_exception_resume(SIM_DESC sd, sim_cpu* cpu, int exception);
 
 #ifdef MIPS_MACH_MULTI
-extern int mips_mach_multi(SIM_DESC sd);
-#define MIPS_MACH(SD)	mips_mach_multi(SD)
+extern address_word micromips_instruction_decode_multi(SIM_DESC sd,
+                   sim_cpu* cpu,
+                   address_word cia,
+                   int instruction_size);
+#define MICROMIPS_INSTRUCTION_DECODE(SD, cpu, cia, size) \
+  micromips_instruction_decode_multi (SD, cpu, cia, size);
 #else
-#define	MIPS_MACH(SD)	MIPS_MACH_DEFAULT
+#define MIPS_MACH(SD) MIPS_MACH_DEFAULT
+#define MICROMIPS_INSTRUCTION_DECODE(SD, cpu, cia, size) \
+  micromips_instruction_decode (SD, cpu, cia, size);
 #endif
 
 /* Macros for determining whether a MIPS IV or MIPS V part is subject
