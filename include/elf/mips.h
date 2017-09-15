@@ -1189,6 +1189,9 @@ extern void bfd_mips_elf_swap_abiflags_v0_in
 extern void bfd_mips_elf_swap_abiflags_v0_out
   (bfd *, const Elf_Internal_ABIFlags_v0 *, Elf_External_ABIFlags_v0 *);
 
+/* MIPS ABI flags data access.  For the disassembler.  */
+extern Elf_Internal_ABIFlags_v0 *bfd_mips_elf_get_abiflags (bfd *);
+
 /* Masks for the info work of an ODK_EXCEPTIONS descriptor.  */
 #define OEX_FPU_MIN	0x1f	/* FPEs which must be enabled.  */
 #define OEX_FPU_MAX	0x1f00	/* FPEs which may be enabled.  */
@@ -1286,7 +1289,7 @@ extern void bfd_mips_elf_swap_abiflags_v0_out
 #define AFL_FLAGS1_ODDSPREG   1	 /* Uses odd single-precision registers.  */
 
 /* Masks for the flags2 word of an ABI flags structure.  */
-#define AFL_FLAGS2_LINKRELAX      2	 /* Module is safe to relax.  */
+#define AFL_FLAGS2_LINKRELAX      2     /* Module is safe to relax.  */
 
 extern unsigned int bfd_mips_isa_ext (bfd *);
 

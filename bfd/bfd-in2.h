@@ -1590,13 +1590,11 @@ enum bfd_architecture
 #define bfd_mach_mipsisa32r3           34
 #define bfd_mach_mipsisa32r5           36
 #define bfd_mach_mipsisa32r6           37
-#define bfd_mach_nanomipsisa32r6       38
 #define bfd_mach_mipsisa64             64
 #define bfd_mach_mipsisa64r2           65
 #define bfd_mach_mipsisa64r3           66
 #define bfd_mach_mipsisa64r5           68
 #define bfd_mach_mipsisa64r6           69
-#define bfd_mach_nanomipsisa64r6       70
 #define bfd_mach_mips_micromips        96
   bfd_arch_i386,      /* Intel 386.  */
 #define bfd_mach_i386_intel_syntax     (1 << 0)
@@ -1957,6 +1955,9 @@ enum bfd_architecture
 #define bfd_mach_ck807         6
 #define bfd_mach_ck810         7
 #define bfd_mach_ck860         8
+  bfd_arch_nanomips,      /* nanoMIPSrX */
+#define bfd_mach_nanomipsisa32r6       32
+#define bfd_mach_nanomipsisa64r6       64
   bfd_arch_last
   };
 
@@ -2716,6 +2717,7 @@ as it is during any transformation/relaxation.  */
 /* nanoMIPS relocations  */
   BFD_RELOC_NANOMIPS_HI20,
   BFD_RELOC_NANOMIPS_LO12,
+  BFD_RELOC_NANOMIPS_LO4_S2,
   BFD_RELOC_NANOMIPS_IMM16,
   BFD_RELOC_NANOMIPS_NEG12,
   BFD_RELOC_NANOMIPS_GPREL7_S2,
@@ -2731,7 +2733,7 @@ as it is during any transformation/relaxation.  */
   BFD_RELOC_NANOMIPS_21_PCREL_S1,
   BFD_RELOC_NANOMIPS_25_PCREL_S1,
   BFD_RELOC_NANOMIPS_PCREL_HI20,
-  BFD_RELOC_NANOMIPS_CALL,
+  BFD_RELOC_NANOMIPS_GOT_CALL,
   BFD_RELOC_NANOMIPS_GOTPC_HI20,
   BFD_RELOC_NANOMIPS_GOTPC_I32,
   BFD_RELOC_NANOMIPS_GOT_LO12,
@@ -2741,6 +2743,7 @@ as it is during any transformation/relaxation.  */
   BFD_RELOC_NANOMIPS_LITERAL,
   BFD_RELOC_NANOMIPS_I32,
   BFD_RELOC_NANOMIPS_GPREL_HI20,
+  BFD_RELOC_NANOMIPS_GPREL_LO12,
   BFD_RELOC_NANOMIPS_HI32,
   BFD_RELOC_NANOMIPS_TLS_GD,
   BFD_RELOC_NANOMIPS_TLS_LDM,
@@ -2749,6 +2752,12 @@ as it is during any transformation/relaxation.  */
   BFD_RELOC_NANOMIPS_TLS_GOTTPREL,
   BFD_RELOC_NANOMIPS_TLS_TPREL_HI20,
   BFD_RELOC_NANOMIPS_TLS_TPREL_LO12,
+  BFD_RELOC_NANOMIPS_TLS_DTPREL32,
+  BFD_RELOC_NANOMIPS_TLS_DTPREL64,
+  BFD_RELOC_NANOMIPS_TLS_TPREL32,
+  BFD_RELOC_NANOMIPS_TLS_TPREL64,
+  BFD_RELOC_NANOMIPS_TLS_DTPMOD32,
+  BFD_RELOC_NANOMIPS_TLS_DTPMOD64,
   BFD_RELOC_NANOMIPS_PC_I32,
   BFD_RELOC_NANOMIPS_GPREL_I32,
   BFD_RELOC_NANOMIPS_GPREL17_S1,
@@ -2758,6 +2767,18 @@ as it is during any transformation/relaxation.  */
   BFD_RELOC_NANOMIPS_UNSIGNED_16,
   BFD_RELOC_NANOMIPS_SIGNED_8,
   BFD_RELOC_NANOMIPS_SIGNED_16,
+  BFD_RELOC_NANOMIPS_EH,
+  BFD_RELOC_NANOMIPS_JUMP_SLOT,
+  BFD_RELOC_NANOMIPS_ALIGN,
+  BFD_RELOC_NANOMIPS_FILL,
+  BFD_RELOC_NANOMIPS_MAX,
+  BFD_RELOC_NANOMIPS_INSN32,
+  BFD_RELOC_NANOMIPS_INSN16,
+  BFD_RELOC_NANOMIPS_FIXED,
+  BFD_RELOC_NANOMIPS_RELAX,
+  BFD_RELOC_NANOMIPS_NORELAX,
+  BFD_RELOC_NANOMIPS_SAVERESTORE,
+  BFD_RELOC_NANOMIPS_JALR,
 
 
 /* Moxie ELF relocations.  */
