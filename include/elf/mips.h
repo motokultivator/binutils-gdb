@@ -159,15 +159,7 @@ START_RELOC_NUMBERS (elf_mips_reloc_type)
   /* microMIPS GP- and PC-relative relocations. */
   RELOC_NUMBER (R_MICROMIPS_GPREL7_S2, 172)
   RELOC_NUMBER (R_MICROMIPS_PC23_S2, 173)
-  RELOC_NUMBER (R_MICROMIPS_ALIGN, 174)
-  RELOC_NUMBER (R_MICROMIPS_FILL, 175)
-  RELOC_NUMBER (R_MICROMIPS_MAX, 176)
-  RELOC_NUMBER (R_MICROMIPS_INSN32, 177)
-  RELOC_NUMBER (R_MICROMIPS_INSN16, 178)
-  RELOC_NUMBER (R_MICROMIPS_FIXED, 179)
-  RELOC_NUMBER (R_MICROMIPS_RELAX, 180)
-  RELOC_NUMBER (R_MICROMIPS_NORELAX, 181)
-  FAKE_RELOC (R_MICROMIPS_max, 182)
+  FAKE_RELOC (R_MICROMIPS_max, 174)
 
   /* This was a GNU extension used by embedded-PIC.  It was co-opted by
      mips-linux for exception-handling data.  GCC stopped using it in
@@ -1189,9 +1181,6 @@ extern void bfd_mips_elf_swap_abiflags_v0_in
 extern void bfd_mips_elf_swap_abiflags_v0_out
   (bfd *, const Elf_Internal_ABIFlags_v0 *, Elf_External_ABIFlags_v0 *);
 
-/* MIPS ABI flags data access.  For the disassembler.  */
-extern Elf_Internal_ABIFlags_v0 *bfd_mips_elf_get_abiflags (bfd *);
-
 /* Masks for the info work of an ODK_EXCEPTIONS descriptor.  */
 #define OEX_FPU_MIN	0x1f	/* FPEs which must be enabled.  */
 #define OEX_FPU_MAX	0x1f00	/* FPEs which may be enabled.  */
@@ -1287,9 +1276,6 @@ extern Elf_Internal_ABIFlags_v0 *bfd_mips_elf_get_abiflags (bfd *);
 
 /* Masks for the flags1 word of an ABI flags structure.  */
 #define AFL_FLAGS1_ODDSPREG   1	 /* Uses odd single-precision registers.  */
-
-/* Masks for the flags2 word of an ABI flags structure.  */
-#define AFL_FLAGS2_LINKRELAX      2     /* Module is safe to relax.  */
 
 extern unsigned int bfd_mips_isa_ext (bfd *);
 

@@ -336,7 +336,7 @@ disassembler (enum bfd_architecture a,
       disassemble = print_insn_metag;
       break;
 #endif
-#if defined (ARCH_mips)
+#ifdef ARCH_mips
     case bfd_arch_mips:
       if (big)
 	disassemble = print_insn_big_mips;

@@ -25,6 +25,10 @@
 
 #include "bfd.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* These are bit masks and shift counts to use to access the various
    fields of an instruction.  To retrieve the X field of an
    instruction, use the expression
@@ -430,59 +434,7 @@ enum mips_operand_type {
   OP_CHECK_PREV,
 
   /* A register operand that must not be zero.  */
-  OP_NON_ZERO_REG,
-
-  OP_MAPPED_STRING,
-  OP_MXU_STRIDE,
-
-  /* The floating-point register list for a nanoMIPS SAVE or RESTORE
-     instruction. */
-  OP_SAVE_RESTORE_FP_LIST,
-
-  /* Fractured upper immediate PC-offset for nanoMIPS */
-  OP_HI20_PCREL,
-
-  /* Fractured upper immediate 20-bit signed integer for nanoMIPS */
-  OP_HI20_INT,
-
-  /* Fractured upper immediate 20-bit scaled integer for nanoMIPS */
-  OP_HI20_SCALE,
-
-  /* A non-zero PC-relative offset.  */
-  OP_NON_ZERO_PCREL_S1,
-
-  /* To check a mapped register against a previous operand.  */
-  OP_MAPPED_CHECK_PREV,
-
-  /* Unsigned word operand.  */
-  OP_UINT_WORD,
-
-  /* Signed word operand.  */
-  OP_INT_WORD,
-
-  /* Immediate PC-relative word operand.  */
-  OP_PC_WORD,
-
-  /* Immediate GP-relative word operand.  */
-  OP_GPREL_WORD,
-
-  /* Don't care bits.  */
-  OP_DONT_CARE,
-
-  /* Immediate unsigned word operand, to be negated.  */
-  OP_NEG_INT,
-
-  /* Immediate (non-relocatable) integer operand.  */
-  OP_IMM_INT,
-
-  /* Immediate (non-relocatable) word operand.  */
-  OP_IMM_WORD,
-
-  /* Base register for limited types of offsets.  */
-  OP_BASE_CHECK_OFFSET,
-
-  /* Copy over bits from another part of instruction.  */
-  OP_COPY_BITS,
+  OP_NON_ZERO_REG
 };
 
 /* Enumerates the types of MIPS register.  */
@@ -529,11 +481,7 @@ enum mips_reg_operand_type {
   OP_REG_MSA,
 
   /* MSA control registers $0-$31.  */
-  OP_REG_MSA_CTRL,
-
-  OP_REG_MXU,
-
-  OP_REG_MXU_GP
+  OP_REG_MSA_CTRL
 };
 
 /* Base class for all operands.  */
@@ -545,11 +493,6 @@ struct mips_operand
   /* The operand occupies SIZE bits of the instruction, starting at LSB.  */
   unsigned short size;
   unsigned short lsb;
-
-  /* These are used to split a value across two different
-     parts of the instruction encoding.  */
-  unsigned int size_top;
-  unsigned int lsb_top;
 };
 
 /* Describes an integer operand with a regular encoding pattern.  */
@@ -591,12 +534,6 @@ struct mips_mapped_int_operand
   bfd_boolean print_hex;
 };
 
-struct mips_mapped_string_operand
-{
-  struct mips_operand root;
-  const char ** strings;
-  int allow_constants;
-};
 /* An operand that encodes the most significant bit position of a bitfield.
    Given a bitfield that spans bits [MSB, LSB], some operands of this type
    encode MSB directly while others encode MSB - LSB.  Each operand of this
@@ -697,15 +634,10 @@ mips_insert_operand (const struct mips_operand *operand, unsigned int insn,
 		     unsigned int uval)
 {
   unsigned int mask;
-  unsigned int size_bottom = operand->size - operand->size_top;
 
-  mask = (1 << size_bottom) - 1;
+  mask = (1 << operand->size) - 1;
   insn &= ~(mask << operand->lsb);
   insn |= (uval & mask) << operand->lsb;
-
-  mask = (1 << operand->size_top) - 1;
-  insn &= ~(mask << operand->lsb_top);
-  insn |= ((uval & (mask << size_bottom)) >> size_bottom) << operand->lsb_top;
   return insn;
 }
 
@@ -714,13 +646,7 @@ mips_insert_operand (const struct mips_operand *operand, unsigned int insn,
 static inline unsigned int
 mips_extract_operand (const struct mips_operand *operand, unsigned int insn)
 {
-  unsigned int uval;
-  unsigned int size_bottom = operand->size - operand->size_top;
-
-  uval = (insn >> operand->lsb_top) & ((1 << operand->size_top) - 1);
-  uval <<= size_bottom;
-  uval |= (insn >> operand->lsb) & ((1 << size_bottom) - 1);
-  return uval;
+  return (insn >> operand->lsb) & ((1 << operand->size) - 1);
 }
 
 /* UVAL is the value encoded by OPERAND.  Return it in signed form.  */
@@ -1066,8 +992,6 @@ mips_opcode_32bit_p (const struct mips_opcode *mo)
    GINV ASE usage:
    "+\" 2 bit Global TLB invalidate type at bit 8
 
-   "-m" MIPS SAVE/RESTORE list
-
    Other:
    "()" parens surrounding optional value
    ","  separates operands
@@ -1090,11 +1014,6 @@ mips_opcode_32bit_p (const struct mips_opcode *mo)
    following), for quick reference when adding more:
    "AB"
    "abdmstuvwxy"
-
-   Extension character sequences used so far ("`" followed by the
-   following), for quick reference when adding more:
-   "ABEIOPTRSU"
-   "abcdefgimopr"
 */
 
 /* These are the bits which may be set in the pinfo field of an
@@ -1213,11 +1132,6 @@ mips_opcode_32bit_p (const struct mips_opcode *mo)
    encoding is needed or otherwise the final EXTEND entry will apply,
    for the disassembly of the prefix only.  */
 #define INSN2_SHORT_ONLY	    0x00010000
-/* This indicates pre-R6 instructions mapped to R6 ones.  */
-#define INSN2_CONVERTED_TO_COMPACT  0x00010000
-/* Instruction prevents the following instruction from being in a DS */
-#define INSN2_NEXT_NO_DS	    0x00020000
-/* Instruction only has a short MIPS16 form in disassembly.  */
 
 /* Masks used to mark instructions to indicate which MIPS ISA level
    they were introduced in.  INSN_ISA_MASK masks an enumeration that
@@ -1238,7 +1152,7 @@ mips_opcode_32bit_p (const struct mips_opcode *mo)
 #define INSN_ISA32R3              8
 #define INSN_ISA32R5              9
 #define INSN_ISA32R6              10
-#define INSN_ISA64                11
+#define INSN_ISA64                11 
 #define INSN_ISA64R2              12
 #define INSN_ISA64R3              13
 #define INSN_ISA64R5              14
@@ -1306,7 +1220,7 @@ static const unsigned int mips_isa_table[] = {
 #undef ISAF
 
 /* Masks used for Chip specific instructions.  */
-#define INSN_CHIP_MASK		  0xc7ff0f20
+#define INSN_CHIP_MASK		  0xc7ff4f60
 
 /* Cavium Networks Octeon instructions.  */
 #define INSN_OCTEON		  0x00000800
@@ -1372,6 +1286,12 @@ static const unsigned int mips_isa_table[] = {
 #define ASE_MSA64		0x00001000
 /* eXtended Physical Address (XPA) Extension.  */
 #define ASE_XPA			0x00002000
+/* DSP R3 Module.  */
+#define ASE_DSPR3		0x00004000
+/* MIPS16e2 ASE.  */
+#define ASE_MIPS16E2		0x00008000
+/* MIPS16e2 MT ASE instructions.  */
+#define ASE_MIPS16E2_MT		0x00010000
 /* The Virtualization ASE has eXtended Physical Addressing (XPA)
    instructions which are only valid when both ASEs are enabled.  */
 #define ASE_XPA_VIRT		0x00020000
@@ -1388,29 +1308,11 @@ static const unsigned int mips_isa_table[] = {
 #define ASE_LOONGSON_EXT	0x00800000
 /* Loongson EXTensions R2 (EXT2) instructions.  */
 #define ASE_LOONGSON_EXT2	0x01000000
-/* MXU Extension.  */
-#define ASE_MXU			0x00004000
-/* DSP R3 ASE  */
-#define ASE_DSPR3		0x00008000
-/* The Virtualization ASE has eXtended Physical Address (XPA) Extension
-   instructions which are only valid when both ASEs are enabled.  */
-#define ASE_VIRT_XPA		0x00010000
-/* The eXtended Physical Address (XPA) Extension has instructions which are
-   only valid for the r6 ISA.  */
-#define ASE_EVA_R6		0x00020000
-/* MIPS16e2 Extension.  */
-#define ASE_MIPS16E2		0x00040000
-/* MIPS16e2 MT ASE instructions.  */
-#define ASE_MIPS16E2_MT   0x00080000
-/* Global INValidate Extension. */
-#define ASE_GINV    0x00800000
-/* Low Power instructions on nanoMIPS.  */
-#define ASE_xNMS    0x02000000
-/* TLB control instructions on nanoMIPS.  */
-#define ASE_TLB     0x04000000
-/* The Virtualization ASE has Global INValidate extension instructions
-   which are only valid when both ASEs are enabled. */
-#define ASE_VIRT_GINV   0x01000000
+/* The Enhanced VA Scheme (EVA) extension has instructions which are
+   only valid for the R6 ISA.  */
+#define ASE_EVA_R6		0x02000000
+
+/* MIPS ISA defines, use instead of hardcoding ISA level.  */
 
 #define       ISA_UNKNOWN     0               /* Gas internal use.  */
 #define       ISA_MIPS1       INSN_ISA1
@@ -1569,6 +1471,7 @@ cpu_is_member (int cpu, unsigned int mask)
    ISA/ASE bitmask to test against; and CPU is the CPU specific ISA to
    test, or zero if no CPU specific ISA test is desired.  Return true
    if instruction INSN is available to the given ISA and CPU. */
+
 static inline bfd_boolean
 opcode_is_member (const struct mips_opcode *insn, int isa, int ase, int cpu)
 {
@@ -1582,7 +1485,7 @@ opcode_is_member (const struct mips_opcode *insn, int isa, int ase, int cpu)
 	return TRUE;
 
       /* Test for ASE compatibility.  */
-      if (insn->ase != 0 && (ase & insn->ase) == insn->ase)
+      if ((ase & insn->ase) != 0)
 	return TRUE;
 
       /* Test for processor-specific extensions.  */
@@ -1727,14 +1630,11 @@ enum
   M_LI_S,
   M_LI_SS,
   M_LL_AB,
-  M_LLX_AB,
   M_LLD_AB,
   M_LLDP_AB,
-  M_LLDX_AB,
   M_LLE_AB,
   M_LLWP_AB,
   M_LLWPE_AB,
-  M_LLXE_AB,
   M_LQ_AB,
   M_LW_AB,
   M_LWE_AB,
@@ -1786,12 +1686,9 @@ enum
   M_SC_AB,
   M_SCD_AB,
   M_SCDP_AB,
-  M_SCDX_AB,
   M_SCE_AB,
   M_SCWP_AB,
   M_SCWPE_AB,
-  M_SCX_AB,
-  M_SCXE_AB,
   M_SD_AB,
   M_SDC1_AB,
   M_SDC2_AB,
@@ -1952,12 +1849,17 @@ extern int bfd_mips_num_opcodes;
    "Z" 3 bit register (MIPS16OP_*_MOVE32Z)
    "v" 3 bit same register as source and destination (MIPS16OP_*_RX)
    "w" 3 bit same register as source and destination (MIPS16OP_*_RY)
-   "0" zero register ($0)
+   "." zero register ($0)
    "S" stack pointer ($sp or $29)
    "P" program counter
    "R" return address register ($ra or $31)
    "X" 5 bit MIPS register (MIPS16OP_*_REGR32)
    "Y" 5 bit MIPS register (MIPS16OP_*_REG32R)
+   "0" 5-bit ASMACRO p0 immediate
+   "1" 3-bit ASMACRO p1 immediate
+   "2" 3-bit ASMACRO p2 immediate
+   "3" 5-bit ASMACRO p3 immediate
+   "4" 3-bit ASMACRO p4 immediate
    "6" 6 bit unsigned break code (MIPS16OP_*_IMM6)
    "a" 26 bit jump address
    "i" likewise, but flips bit 0
@@ -1966,9 +1868,7 @@ extern int bfd_mips_num_opcodes;
    "L" register list for exit instruction
    ">" 5-bit SYNC code
    "9" 9-bit signed immediate
-   "F" 16-bit unsigned immediate
    "G" global pointer ($gp or $28)
-   "J" 8-bit signed immediate
    "N" 5-bit coprocessor register
    "O" 3-bit sel field for MFC0/MTC0
    "Q" 5-bit hardware register
@@ -1991,13 +1891,11 @@ extern int bfd_mips_num_opcodes;
 
    The remaining codes may be extended.  Except as otherwise noted,
    the full extended operand is a 16 bit signed value.
-   "<" 3 bit unsigned shift count * 0 (MIPS16OP_*_RZ) (full 5 bit unsigned;
-						       also SYNC code)
-   ">" 3 bit unsigned shift count * 0 (MIPS16OP_*_RX) (full 5 bit unsigned)
+   "<" 3 bit unsigned shift count * 0 (MIPS16OP_*_RZ) (full 5 bit unsigned)
    "[" 3 bit unsigned shift count * 0 (MIPS16OP_*_RZ) (full 6 bit unsigned)
    "]" 3 bit unsigned shift count * 0 (MIPS16OP_*_RX) (full 6 bit unsigned)
-   "4" 4 bit signed immediate * 0 (MIPS16OP_*_IMM4) (full 15 bit signed)
    "5" 5 bit unsigned immediate * 0 (MIPS16OP_*_IMM5)
+   "F" 4 bit signed immediate * 0 (MIPS16OP_*_IMM4) (full 15 bit signed)
    "H" 5 bit unsigned immediate * 2 (MIPS16OP_*_IMM5)
    "W" 5 bit unsigned immediate * 4 (MIPS16OP_*_IMM5)
    "D" 5 bit unsigned immediate * 8 (MIPS16OP_*_IMM5)
@@ -2404,34 +2302,6 @@ extern const int bfd_mips16_num_opcodes;
    microMIPS Enhanced VA Scheme:
    "+j" 9-bit signed offset in bit 0 (OP_*_EVAOFFSET)
 
-   microMIPS R6:
-   "+:" 11-bit mask at bit 0
-   "+'" 26 bit PC relative branch target address
-   "+"" 21 bit PC relative branch target address
-   "+;" 5 bit same register in both OP_*_RS and OP_*_RT
-   "+D" 5-bit destination floating point register
-   "+I" 2bit unsigned bit position at bit 9
-   "+K" 4-bit immediate (0 .. 15) at bit 6
-   "+L" 4-bit immediate (0 .. 15) << 2 at bit 4
-   "+M" 16-bit unsigned immediate at bit 6
-   "+N" 2-bit immediate (0 .. 3) for register list at bit 8
-   "+O" 3bit unsigned bit position at bit 9
-   "+P" 5-bit immediate (0 .. 31) << 2 at bit 5
-   "+S" 5-bit fs source 1 floating point register
-   "+s" 5-bit source register specifier (MICROMIPSOP_*_RS) at 21
-   "+t" 5-bit target register (MICROMIPSOP_*_RT) at bit 16
-   "-a" (-262144 .. 262143) << 2 at bit 0
-   "-b" (-131072 .. 131071) << 3 at bit 0
-   "-s" 5 bit source register specifier (OP_*_RS) not $0
-   "-t" 5 bit source register specifier (OP_*_RT) not $0
-   "-u" 5 bit target register specifier (OP_*_RT) less than OP_*_RS
-   "-v" 5 bit target register specifier (OP_*_RT) not $0 different than OP_*_RS
-   "-w" 5 bit target register specifier (OP_*_RT) greater than OP_*_RS
-   "-x" 5 bit source register specifier (OP_*_RS) less than OP_*_RT
-   "-y" 5 bit source register specifier (OP_*_RS) greater than OP_*_RT
-   "-A" symbolic offset (-262144 .. 262143) << 2 at bit 0
-   "-B" symbolic offset (-131072 .. 131071) << 3 at bit 0
-
    MSA Extension:
    "+d" 5-bit MSA register (FD)
    "+e" 5-bit MSA register (FS)
@@ -2458,7 +2328,6 @@ extern const int bfd_mips16_num_opcodes;
    "+&" 0 vector element index
    "+*" 5-bit register vector element index at bit 16
    "+|" 8-bit mask at bit 16
-   "+." microMIPS R6: 2 bit LSA/DLSA shift amount from 1 to 4 at bit 9
 
    Other:
    "()" parens surrounding optional value
@@ -2475,9 +2344,9 @@ extern const int bfd_mips16_num_opcodes;
    Extension character sequences used so far ("+" followed by the
    following), for quick reference when adding more:
    ""
-   "~!@#$%^&*|'":;"
-   "ABCDEFGHIJKLMNOP  STUVW   "
-   "   de  hijkl no     uvwx  "
+   "~!@#$%^&*|"
+   "ABCEFGHJTUVW"
+   "dehijklnouvwx"
 
    Extension character sequences used so far ("m" followed by the
    following), for quick reference when adding more:
@@ -2490,8 +2359,7 @@ extern const int bfd_mips16_num_opcodes;
    following), for quick reference when adding more:
    ""
    ""
-   "AB                        "
-   "ab                stuvwyx "
+   <none so far>
 */
 
 extern const struct mips_operand *decode_micromips_operand (const char *);
@@ -2501,5 +2369,9 @@ extern const int bfd_micromips_num_opcodes;
 /* A NOP insn impemented as "or at,at,zero".
    Used to implement -mfix-loongson2f.  */
 #define LOONGSON2F_NOP_INSN	0x00200825
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _MIPS_H_ */
