@@ -536,9 +536,6 @@ DESCRIPTION
 .#define bfd_mach_nios2		0
 .#define bfd_mach_nios2r1	1
 .#define bfd_mach_nios2r2	2
-.  bfd_arch_nanomips,      {* nanoMIPSrX *}
-.#define bfd_mach_nanomipsisa32r6       32
-.#define bfd_mach_nanomipsisa64r6       64
 .  bfd_arch_visium,	{* Visium *}
 .#define bfd_mach_visium	1
 .  bfd_arch_wasm32,    {* WebAssembly.  *}
@@ -558,6 +555,9 @@ DESCRIPTION
 .#define bfd_mach_ck807		6
 .#define bfd_mach_ck810		7
 .#define bfd_mach_ck860		8
+.  bfd_arch_nanomips,      {* nanoMIPSrX *}
+.#define bfd_mach_nanomipsisa32r6       32
+.#define bfd_mach_nanomipsisa64r6       64
 .  bfd_arch_last
 .  };
 */

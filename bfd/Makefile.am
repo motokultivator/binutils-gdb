@@ -552,11 +552,11 @@ BFD64_BACKENDS = \
 	elfxx-ia64.lo \
 	elfn32-mips.lo \
 	elf64-mips.lo \
-	elf64-nanomips.lo \
 	elfxx-mips.lo \
-	elfxx-nanomips.lo \
 	elf64-mmix.lo \
 	elf64-nfp.lo \
+	elf64-nanomips.lo \
+	elfxx-nanomips.lo \
 	elf64-ppc.lo \
 	elf32-riscv.lo \
 	elf64-riscv.lo \
@@ -672,8 +672,8 @@ BUILD_CFILES = \
 	elf32-aarch64.c elf64-aarch64.c \
 	elf32-ia64.c elf64-ia64.c \
 	elf32-riscv.c elf64-riscv.c \
-	peigen.c pepigen.c pex64igen.c \
-	elf32-nanomips.c elf64-nanomips.c
+	elf32-nanomips.c elf64-nanomips.c \
+	peigen.c pepigen.c pex64igen.c
 
 CFILES = $(SOURCE_CFILES) $(BUILD_CFILES)
 
