@@ -224,6 +224,9 @@ typedef struct disassemble_info
      disassembling such as the way mapping symbols are found on AArch64.  */
   bfd_vma stop_offset;
 
+  /* Predict the size of an instruction.  */
+  int (* predict_insn_length)
+    (bfd_vma, int,  struct disassemble_info *);
 } disassemble_info;
 
 /* This struct is used to pass information about valid disassembler
@@ -400,6 +403,10 @@ extern int generic_symbol_at_address
 /* Also always true.  */
 extern bfd_boolean generic_symbol_is_valid
   (asymbol *, struct disassemble_info *);
+
+/* Generic insn length, returns 2nd argument.  */
+extern int generic_predict_insn_length
+  (bfd_vma, int, struct disassemble_info *);
 
 /* Method to initialize a disassemble_info struct.  This should be
    called by all applications creating such a struct.  */
