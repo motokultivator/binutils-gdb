@@ -48,7 +48,7 @@ WHICH = mips-linux mips-dsp-linux \
 	microblaze-with-stack-protect \
 	mips64-linux mips64-dsp-linux \
 	nanomips \
-	nanomips-linux \
+	nanomips-linux nanomips-dsp-linux \
 	nios2-linux \
 	rs6000/powerpc-32 \
 	rs6000/powerpc-32l rs6000/powerpc-altivec32l rs6000/powerpc-e500l \
@@ -117,6 +117,7 @@ XMLTOC = \
 	mips64-linux.xml \
 	nanomips.xml \
 	nanomips-linux.xml \
+	nanomips-dsp-linux.xml \
 	nds32.xml \
 	nios2.xml \
 	or1k.xml \
