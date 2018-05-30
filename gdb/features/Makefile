@@ -49,6 +49,7 @@ WHICH = mips-linux mips-dsp-linux \
 	mips64-linux mips64-dsp-linux \
 	nanomips \
 	nanomips-linux nanomips-dsp-linux \
+	nanomips64-linux nanomips64-dsp-linux \
 	nios2-linux \
 	rs6000/powerpc-32 \
 	rs6000/powerpc-32l rs6000/powerpc-altivec32l rs6000/powerpc-e500l \
@@ -118,6 +119,8 @@ XMLTOC = \
 	nanomips.xml \
 	nanomips-linux.xml \
 	nanomips-dsp-linux.xml \
+	nanomips64-linux.xml \
+	nanomips64-dsp-linux.xml \
 	nds32.xml \
 	nios2.xml \
 	or1k.xml \
