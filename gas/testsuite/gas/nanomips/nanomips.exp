@@ -528,6 +528,9 @@ if { [istarget nanomips*-*-*] } {
     run_list_test_arches "ctc-err" ""	[arch_list_matching xnms]
 
     run_dump_test "cfi-frames"
+    run_dump_test "cfa-advance-loc-1"
+    run_dump_test "cfa-advance-loc-2"
+    run_dump_test "cfa-advance-loc-3"
     run_dump_test_arch "cp0-names-numeric" "" nanomips32r6
     run_dump_test_arch "cp0-names" "" nanomips32r6
 

@@ -101,6 +101,11 @@
 #define tc_cfi_reloc_for_encoding(e) BFD_RELOC_NONE
 #endif
 
+#ifndef tc_cfa_advance_loc_invariable_p
+# define tc_cfa_advance_loc_invariable_p(to,from) \
+	(symbol_get_frag (to) == symbol_get_frag (from))
+#endif
+
 /* Private segment collection list.  */
 struct dwcfi_seg_list
 {
@@ -1582,6 +1587,7 @@ dot_cfi_personality_id (int ignored ATTRIBUTE_UNUSED)
 }
 #endif
 
+
 static void
 output_cfi_insn (struct cfi_insn_data *insn)
 {
@@ -1595,7 +1601,7 @@ output_cfi_insn (struct cfi_insn_data *insn)
 	symbolS *from = insn->u.ll.lab1;
 	symbolS *to = insn->u.ll.lab2;
 
-	if (symbol_get_frag (to) == symbol_get_frag (from))
+	if (tc_cfa_advance_loc_invariable_p (to, from))
 	  {
 	    addressT delta = S_GET_VALUE (to) - S_GET_VALUE (from);
 	    addressT scaled = delta / DWARF2_LINE_MIN_INSN_LENGTH;

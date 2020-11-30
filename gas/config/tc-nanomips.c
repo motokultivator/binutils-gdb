@@ -13840,3 +13840,9 @@ s_jumptable (int x ATTRIBUTE_UNUSED)
   jumptable_record_pending_fix = TRUE;
   return;
 }
+
+
+bfd_boolean nanomips_cfa_advance_loc_invariable_p (symbolS *to, symbolS *from)
+{
+  return (nanomips_allow_local_subtract_symbols (to, from, TRUE));
+}

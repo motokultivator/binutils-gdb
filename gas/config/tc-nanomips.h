@@ -210,4 +210,7 @@ void nanomips_pre_relax_hook (void);
 void nanomips_post_relax_hook (void);
 #define md_post_relax_hook nanomips_post_relax_hook()
 
+int nanomips_cfa_advance_loc_invariable_p (symbolS *, symbolS *);
+#define tc_cfa_advance_loc_invariable_p(to,from) \
+	nanomips_cfa_advance_loc_invariable_p(to,from)
 #endif /* TC_NANOMIPS */
