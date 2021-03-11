@@ -707,11 +707,16 @@ Archive::get_elf_object_for_member(off_t off, bool* punconfigured)
 
   if (parameters->options().has_plugins())
     {
+      const std::string& name
+        = (parameters->options().plugin_preserve_object_names() && is_elf_obj
+           ? obj->name()
+           : this->input_file_->filename());
       Object* plugin_obj
 	= parameters->options().plugins()->claim_file(input_file,
 						      memoff,
 						      memsize,
-						      obj);
+						      obj,
+						      name);
       if (plugin_obj != NULL)
         {
           // The input file was claimed by a plugin, and its symbols

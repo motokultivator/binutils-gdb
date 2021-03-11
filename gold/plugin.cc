@@ -178,6 +178,9 @@ register_new_input(ld_plugin_new_input_handler handler);
 static enum ld_plugin_status
 get_wrap_symbols(uint64_t *num_symbols, const char ***wrap_symbol_list);
 
+static enum ld_plugin_status
+add_input_file_with_name(const char *pathname, const char *name);
+
 };
 
 #endif // ENABLE_PLUGINS
@@ -223,7 +226,8 @@ Plugin::load()
   sscanf(ver, "%d.%d", &major, &minor);
 
   // Allocate and populate a transfer vector.
-  const int tv_fixed_size = 31;
+  const int tv_fixed_size =
+        parameters->options().plugin_preserve_object_names() ? 32 : 31;
 
   int tv_size = this->args_.size() + tv_fixed_size;
   ld_plugin_tv* tv = new ld_plugin_tv[tv_size];
@@ -364,6 +368,13 @@ Plugin::load()
   ++i;
   tv[i].tv_tag = LDPT_GET_WRAP_SYMBOLS;
   tv[i].tv_u.tv_get_wrap_symbols = get_wrap_symbols;
+
+  if (parameters->options().plugin_preserve_object_names())
+    {
+        ++i;
+        tv[i].tv_tag = LDPT_ADD_INPUT_FILE_WITH_NAME;
+        tv[i].tv_u.tv_add_input_file_with_name = add_input_file_with_name;
+    }
 
   ++i;
   tv[i].tv_tag = LDPT_NULL;
@@ -737,7 +748,8 @@ Plugin_manager::load_plugins(Layout* layout)
 
 Pluginobj*
 Plugin_manager::claim_file(Input_file* input_file, off_t offset,
-                           off_t filesize, Object* elf_object)
+                           off_t filesize, Object* elf_object,
+                           const std::string& name)
 {
   bool lock_initialized = this->initialize_lock_.initialize();
 
@@ -746,7 +758,7 @@ Plugin_manager::claim_file(Input_file* input_file, off_t offset,
 
   unsigned int handle = this->objects_.size();
   this->input_file_ = input_file;
-  this->plugin_input_file_.name = input_file->filename().c_str();
+  this->plugin_input_file_.name = name.c_str();
   this->plugin_input_file_.fd = input_file->file().descriptor();
   this->plugin_input_file_.offset = offset;
   this->plugin_input_file_.filesize = filesize;
@@ -1164,15 +1176,18 @@ Plugin_manager::set_extra_library_path(const char* path)
 // Add a new input file.
 
 ld_plugin_status
-Plugin_manager::add_input_file(const char* pathname, bool is_lib)
+Plugin_manager::add_input_file(const char* pathname, bool is_lib,
+                               const char* name)
 {
   Input_file_argument file(pathname,
                            (is_lib
                             ? Input_file_argument::INPUT_FILE_TYPE_LIBRARY
-                            : Input_file_argument::INPUT_FILE_TYPE_FILE),
+                            : (name
+                                ? Input_file_argument::INPUT_FILE_TYPE_FILE_WITH_NAME
+                                : Input_file_argument::INPUT_FILE_TYPE_FILE)),
                            (is_lib
                             ? this->extra_search_path_.c_str()
-                            : ""),
+                            : name ? name : ""),
                            false,
                            this->options_);
   Input_argument* input_argument = new Input_argument(file);
@@ -1921,7 +1936,7 @@ static enum ld_plugin_status
 add_input_file(const char* pathname)
 {
   gold_assert(parameters->options().has_plugins());
-  return parameters->options().plugins()->add_input_file(pathname, false);
+  return parameters->options().plugins()->add_input_file(pathname, false, NULL);
 }
 
 // Add a new (real) library required by a plugin.
@@ -1930,7 +1945,7 @@ static enum ld_plugin_status
 add_input_library(const char* pathname)
 {
   gold_assert(parameters->options().has_plugins());
-  return parameters->options().plugins()->add_input_file(pathname, true);
+  return parameters->options().plugins()->add_input_file(pathname, true, NULL);
 }
 
 // Set the extra library path to be used by libraries added via
@@ -2254,6 +2269,14 @@ register_new_input(ld_plugin_new_input_handler handler)
   gold_assert(parameters->options().has_plugins());
   parameters->options().plugins()->set_new_input_handler(handler);
   return LDPS_OK;
+}
+
+static enum ld_plugin_status
+add_input_file_with_name(const char* pathname, const char* name)
+{
+  gold_assert(parameters->options().has_plugins());
+  gold_assert(parameters->options().plugin_preserve_object_names());
+  return parameters->options().plugins()->add_input_file(pathname, false, name);
 }
 
 #endif // ENABLE_PLUGINS

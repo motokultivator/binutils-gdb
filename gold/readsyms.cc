@@ -336,13 +336,38 @@ Read_symbols::do_read_symbols(Workqueue* workqueue)
       elf_obj = make_elf_object(input_file->filename(),
 				input_file, 0, ehdr, read_size,
 				punconfigured);
+
+      if (input_file->input_file_argument()->has_extra_name())
+	{
+	  const std::string& extra_name =
+	        input_file->input_file_argument()->extra_name();
+
+	  size_t pos = extra_name.find('(');
+
+	  if (pos != std::string::npos
+	      && extra_name.find(')') == (extra_name.size() - 1))
+	    {
+	      elf_obj->set_archive_name(extra_name.substr(0, pos));
+	      elf_obj->set_object_name(
+	        extra_name.substr(pos + 1, extra_name.size() - pos - 2));
+	    }
+	  else
+	    {
+	      elf_obj->set_object_name(extra_name);
+	    }
+
+            elf_obj->set_name(extra_name);
+	}
+
     }
 
   if (parameters->options().has_plugins())
     {
+      const std::string& name = input_file->filename();
       Pluginobj* obj = parameters->options().plugins()->claim_file(input_file,
                                                                    0, filesize,
-								   elf_obj);
+								   elf_obj,
+                                                                   name);
       if (obj != NULL)
         {
 	  // Delete the elf_obj, this file has been claimed.

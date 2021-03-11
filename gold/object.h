@@ -434,6 +434,11 @@ class Object
   archive_name() const
   { return this->archive_name_.empty() ? NULL : this->archive_name_.c_str(); }
 
+  // Set the name of this object as we would report it to the user.
+  void
+  set_name(const std::string& name)
+  { this->name_ = name; }
+
   // Set the name of this object.  This is used when object is in archive.
   void
   set_object_name(const std::string& name)

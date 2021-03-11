@@ -1541,6 +1541,11 @@ class General_options
   DEFINE_bool(origin, options::DASH_Z, '\0', false,
 	      N_("Mark DSO to indicate that needs immediate $ORIGIN "
 		 "processing at runtime"), NULL);
+#ifdef ENABLE_PLUGINS
+  DEFINE_bool(plugin_preserve_object_names, options::DASH_Z, '\0', false,
+	      N_("Provide original object names through plugin API"),
+        NULL);
+#endif
   DEFINE_bool(relro, options::DASH_Z, '\0', DEFAULT_LD_Z_RELRO,
 	      N_("Where possible mark variables read-only after relocation"),
 	      N_("Don't mark variables read-only after relocation"));
@@ -1990,7 +1995,10 @@ class Input_file_argument
     // for using the -L paths.
     INPUT_FILE_TYPE_LIBRARY,
     // A regular file, name used as-is, but searched using the -L paths.
-    INPUT_FILE_TYPE_SEARCHED_FILE
+    INPUT_FILE_TYPE_SEARCHED_FILE,
+    // A regular file, name used as-is, not searched.
+    // extra_search_path_or_name used as name for matching and printing
+    INPUT_FILE_TYPE_FILE_WITH_NAME
   };
 
   // name: file name or library name
@@ -2002,15 +2010,16 @@ class Input_file_argument
   // options: The position dependent options at this point in the
   //         command line, such as --whole-archive.
   Input_file_argument()
-    : name_(), type_(INPUT_FILE_TYPE_FILE), extra_search_path_(""),
+    : name_(), type_(INPUT_FILE_TYPE_FILE), extra_search_path_or_name_(""),
       just_symbols_(false), options_(), arg_serial_(0)
   { }
 
   Input_file_argument(const char* name, Input_file_type type,
-		      const char* extra_search_path,
+		      const char* extra_search_path_or_name,
 		      bool just_symbols,
 		      const Position_dependent_options& options)
-    : name_(name), type_(type), extra_search_path_(extra_search_path),
+    : name_(name), type_(type),
+      extra_search_path_or_name_(extra_search_path_or_name),
       just_symbols_(just_symbols), options_(options), arg_serial_(0)
   { }
 
@@ -2019,10 +2028,11 @@ class Input_file_argument
   // position-independent vars from the General_options and only store
   // those.
   Input_file_argument(const char* name, Input_file_type type,
-		      const char* extra_search_path,
+		      const char* extra_search_path_or_name,
 		      bool just_symbols,
 		      const General_options& options)
-    : name_(name), type_(type), extra_search_path_(extra_search_path),
+    : name_(name), type_(type),
+      extra_search_path_or_name_(extra_search_path_or_name),
       just_symbols_(just_symbols), options_(options), arg_serial_(0)
   { }
 
@@ -2042,12 +2052,25 @@ class Input_file_argument
   is_searched_file() const
   { return type_ == INPUT_FILE_TYPE_SEARCHED_FILE; }
 
+  bool
+  has_extra_name() const
+  { return type_ == INPUT_FILE_TYPE_FILE_WITH_NAME; }
+
   const char*
   extra_search_path() const
   {
-    return (this->extra_search_path_.empty()
+    return ((this->extra_search_path_or_name_.empty()
+             || this->has_extra_name())
 	    ? NULL
-	    : this->extra_search_path_.c_str());
+	    : this->extra_search_path_or_name_.c_str());
+  }
+
+  const char*
+  extra_name() const
+  {
+    return (this->has_extra_name()
+	    ? this->extra_search_path_or_name_.c_str()
+	    : this->name_.c_str());
   }
 
   // Return whether we should only read symbols from this file.
@@ -2062,7 +2085,7 @@ class Input_file_argument
   {
     return (this->is_lib()
 	    || this->is_searched_file()
-	    || !this->extra_search_path_.empty());
+	    || (this->extra_search_path() != NULL));
   }
 
   // Set the serial number for this argument.
@@ -2081,7 +2104,7 @@ class Input_file_argument
   // in that case.
   std::string name_;
   Input_file_type type_;
-  std::string extra_search_path_;
+  std::string extra_search_path_or_name_;
   bool just_symbols_;
   Position_dependent_options options_;
   // A unique index for this file argument in the argument list.

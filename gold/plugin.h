@@ -184,7 +184,7 @@ class Plugin_manager
   // Call the plugin claim-file handlers in turn to see if any claim the file.
   Pluginobj*
   claim_file(Input_file* input_file, off_t offset, off_t filesize,
-             Object* elf_object);
+             Object* elf_object, const std::string& name);
 
   // Get the object associated with the handle and check if it is an elf object.
   // If it is not a Pluginobj, it is an elf object.
@@ -299,7 +299,7 @@ class Plugin_manager
 
   // Add a new input file.
   ld_plugin_status
-  add_input_file(const char* pathname, bool is_lib);
+  add_input_file(const char* pathname, bool is_lib, const char* name);
 
   // Set the extra library path.
   ld_plugin_status
