@@ -71,9 +71,7 @@ enum Transform_type
   TT_PCREL32_LONG,
   // Pc-relative GOT transformations.
   TT_GOTPCREL_NMF,
-  TT_GOTPCREL_LONG,
-  // Transform to 16-bit save/restore.jrc instruction.
-  TT_SAVERESTORE16
+  TT_GOTPCREL_LONG
 };
 
 // The Nanomips_insn_template class is to store information about a

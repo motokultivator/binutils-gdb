@@ -4671,8 +4671,7 @@ Nanomips_transformations<size, big_endian>::transform(
     input_section->add_branch_reloc(r_type, r_offset);
 
   // Discard relocation for TT_DISCARD type.
-  if (type == TT_DISCARD
-      || type == TT_SAVERESTORE16)
+  if (type == TT_DISCARD)
     {
       reloc_write.put_r_offset(0);
       reloc_write.put_r_info(
@@ -5142,24 +5141,7 @@ Nanomips_relax_insn<size, big_endian>::type(
 
         // If gp is not used, transform save[gp]/restore[gp]
         // into save/restore.
-	 if (!is_gp_used)
-	   {
-	     unsigned int count = insn_property->treg(insn);
-	     unsigned int sreg = insn_property->sreg(insn);
-	     unsigned int u = (sreg & 0x1ff) << 3;
-	     unsigned int rt = (sreg & 0x3e00) >> 9;
-	     // Some save/restore.jrc instructionsns can be transformed to their
-	     // 16-bit variants.
-	     if (strcmp(insn_property->name().c_str(), "restore[gp]")
-		 // Maximum offset in a 16-bit save/restore.jrc instruction.
-		 && u <= 240
-		 && ((count == 1 && rt == 28)
-		     || (rt == 30 || rt == 31)))
-	       return TT_SAVERESTORE16;
-	     else
-	       return TT_DISCARD;
-	   }
-	 return TT_NONE;
+        return !is_gp_used ? TT_DISCARD : TT_NONE;
       }
     case elfcpp::R_NANOMIPS_GOT_CALL:
     case elfcpp::R_NANOMIPS_GOT_DISP:
