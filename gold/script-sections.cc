@@ -2707,6 +2707,7 @@ Output_section_definition::Output_section_definition(
     is_relro_(false),
     script_section_type_(header->section_type),
     discard_(name_ == "/DISCARD/"),
+    has_empty_patterns_(false),
     backward_dot_move_expected_(false)
 {
 }
