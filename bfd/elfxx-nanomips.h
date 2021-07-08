@@ -29,7 +29,7 @@ extern bfd_boolean _bfd_nanomips_elf_section_from_shdr
   (bfd *, Elf_Internal_Shdr *, const char *, int);
 extern bfd_boolean _bfd_nanomips_elf_fake_sections
   (bfd *, Elf_Internal_Shdr *, asection *);
-extern void _bfd_nanomips_elf_final_write_processing (bfd *, bfd_boolean);
+extern bfd_boolean _bfd_nanomips_elf_final_write_processing (bfd *);
 extern const char *_bfd_nanomips_fp_abi_string (int);
 extern bfd_boolean _bfd_nanomips_elf_print_private_bfd_data (bfd *, void *);
 

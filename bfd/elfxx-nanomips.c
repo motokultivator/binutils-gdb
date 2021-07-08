@@ -263,11 +263,12 @@ elf_nanomips_abi_name (bfd *abfd)
    used by both the 32-bit and the 64-bit ABI.  */
 
 bfd_boolean
-_bfd_nanomips_elf_section_processing (bfd *abfd, Elf_Internal_Shdr *hdr)
+_bfd_nanomips_elf_section_processing (bfd *abfd ATTRIBUTE_UNUSED,
+				      Elf_Internal_Shdr *hdr)
 {
   if (hdr->bfd_section != NULL)
     {
-      const char *name = bfd_get_section_name (abfd, hdr->bfd_section);
+      const char *name = bfd_section_name (hdr->bfd_section);
 
       /* .sbss is not handled specially here because the GNU/Linux
          prelinker can convert .sbss from NOBITS to PROGBITS and
@@ -339,9 +340,8 @@ _bfd_nanomips_elf_section_from_shdr (bfd *abfd, Elf_Internal_Shdr *hdr,
 
   if (flags)
     {
-      if (!bfd_set_section_flags (abfd, hdr->bfd_section,
-				  (bfd_get_section_flags (abfd,
-							  hdr->bfd_section)
+      if (!bfd_set_section_flags (hdr->bfd_section,
+				  (bfd_section_flags (hdr->bfd_section)
 				   | flags)))
 	return FALSE;
     }
@@ -368,10 +368,11 @@ _bfd_nanomips_elf_section_from_shdr (bfd *abfd, Elf_Internal_Shdr *hdr,
    used by both the 32-bit and the 64-bit ABI.  */
 
 bfd_boolean
-_bfd_nanomips_elf_fake_sections (bfd *abfd, Elf_Internal_Shdr *hdr,
+_bfd_nanomips_elf_fake_sections (bfd *abfd ATTRIBUTE_UNUSED,
+				 Elf_Internal_Shdr *hdr,
 				 asection *sec)
 {
-  const char *name = bfd_get_section_name (abfd, sec);
+  const char *name = bfd_section_name (sec);
 
   if (CONST_STRNEQ (name, ".nanoMIPS.abiflags"))
     {
@@ -415,11 +416,11 @@ nanomips_set_isa_flags (bfd *abfd)
    object file.  This gets the nanoMIPS architecture right based on the
    machine number.  This is used by both the 32-bit and the 64-bit ABI.  */
 
-void
-_bfd_nanomips_elf_final_write_processing (bfd *abfd,
-					  bfd_boolean linker ATTRIBUTE_UNUSED)
+bfd_boolean
+_bfd_nanomips_elf_final_write_processing (bfd *abfd)
 {
   nanomips_set_isa_flags (abfd);
+  return _bfd_elf_final_write_processing (abfd);
 }
 
 
@@ -719,14 +720,14 @@ _bfd_elf_nanomips_get_relocated_section_contents (bfd *abfd,
 
 	  if (symbol->section && discarded_section (symbol->section))
 	    {
-	      bfd_byte *p;
+	      bfd_vma off;
 	      static reloc_howto_type none_howto
 		= HOWTO (0, 0, 0, 0, FALSE, 0, complain_overflow_dont, NULL,
 			 "unused", FALSE, 0, 0, FALSE);
 
-	      p = data + (*parent)->address * bfd_octets_per_byte (input_bfd);
+	      off = (*parent)->address * bfd_octets_per_byte (input_bfd, input_section);
 	      _bfd_clear_contents ((*parent)->howto, input_bfd, input_section,
-				   p);
+				   data, off);
 	      (*parent)->sym_ptr_ptr = bfd_abs_section_ptr->symbol_ptr_ptr;
 	      (*parent)->addend = 0;
 	      (*parent)->howto = &none_howto;

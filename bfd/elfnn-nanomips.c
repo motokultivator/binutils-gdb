@@ -1317,7 +1317,8 @@ bfd_elfNN_bfd_reloc_name_lookup (bfd *abfd ATTRIBUTE_UNUSED,
 /* Given a nanoMIPS Elf_Internal_Rel, fill in an arelent structure.  */
 
 static reloc_howto_type *
-nanomips_elfNN_rtype_to_howto (unsigned int r_type,
+nanomips_elfNN_rtype_to_howto (bfd *abfd ATTRIBUTE_UNUSED,
+			       unsigned int r_type,
 			       bfd_boolean rela_p ATTRIBUTE_UNUSED)
 {
   switch (r_type)
@@ -1337,7 +1338,7 @@ nanomips_elfNN_rtype_to_howto (unsigned int r_type,
 
 /* Given a nanoMIPS Elf_Internal_Rela, fill in an arelent structure.  */
 
-static void
+static bfd_boolean
 nanomips_info_to_howto_rela (bfd *abfd, arelent *cache_ptr,
 			     Elf_Internal_Rela *dst)
 {
@@ -1346,8 +1347,9 @@ nanomips_info_to_howto_rela (bfd *abfd, arelent *cache_ptr,
 
   r_type = ELFNN_R_TYPE (dst->r_info);
   bed = get_elf_backend_data (abfd);
-  cache_ptr->howto = bed->elf_backend_mips_rtype_to_howto (r_type, TRUE);
+  cache_ptr->howto = bed->elf_backend_mips_rtype_to_howto (abfd, r_type, TRUE);
   cache_ptr->addend = dst->r_addend;
+  return TRUE;
 }
 
 /* nanoMIPS ELF local labels start with '$'.  */

@@ -39,6 +39,7 @@
     bfd_default_scan,					\
     bfd_arch_default_fill,				\
     NEXT,						\
+    0 /* Maximum offset of a reloc from the start of an insn.  */ \
   }
 
 enum
