@@ -31,6 +31,58 @@
 #include "nat/nanomips-linux-watch.h"
 #include "gdb_proc_service.h"
 
+class nanomips_target : public linux_process_target
+{
+public:
+
+  const regs_info *get_regs_info () override;
+
+  const gdb_byte *sw_breakpoint_from_kind (int kind, int *size) override;
+
+#ifdef NANOMIPS_WATCHPOINTS
+  bool supports_z_point_type (char z_type) override;
+#endif /* NANOMIPS_WATCHPOINTS */
+
+protected:
+
+  void low_arch_setup () override;
+
+  bool low_cannot_fetch_register (int regno) override;
+
+  bool low_cannot_store_register (int regno) override;
+
+  bool low_supports_breakpoints () override;
+
+  CORE_ADDR low_get_pc (regcache *regcache) override;
+
+  void low_set_pc (regcache *regcache, CORE_ADDR newpc) override;
+
+  bool low_breakpoint_at (CORE_ADDR pc) override;
+#ifdef NANOMIPS_WATCHPOINTS
+  int low_insert_point (raw_bkpt_type type, CORE_ADDR addr,
+      int size, raw_breakpoint *bp) override;
+
+  int low_remove_point (raw_bkpt_type type, CORE_ADDR addr,
+      int size, raw_breakpoint *bp) override;
+
+  bool low_stopped_by_watchpoint () override;
+
+  CORE_ADDR low_stopped_data_address () override;
+
+  arch_process_info *low_new_process () override;
+
+  void low_new_thread (lwp_info *) override;
+
+  void low_new_fork (process_info *parent, process_info *child) override;
+
+  void low_prepare_to_resume (lwp_info *lwp) override;
+#endif /* NANOMIPS_WATCHPOINTS */
+};
+
+/* The singleton target ops object.  */
+
+static nanomips_target the_nanomips_target;
+
 /* Defined in auto-generated file nanomips-linux.c.  */
 void init_registers_nanomips_linux (void);
 extern const struct target_desc *tdesc_nanomips_linux;
@@ -77,7 +129,7 @@ nanomips_read_description (void)
   iovec.iov_len = sizeof (buf);
 
   if (ptrace (PTRACE_GETREGSET, pid, NT_PRSTATUS, &iovec) == 0)
-    have_64bit = 1;
+    have_64bit = iovec.iov_len >= sizeof(buf);
   else if (errno == EIO)
     have_64bit = 0;
   else
@@ -95,10 +147,25 @@ nanomips_read_description (void)
     return have_dsp ? tdesc_nanomips_dsp_linux : tdesc_nanomips_linux;
 }
 
-static void
-nanomips_arch_setup (void)
+void
+nanomips_target::low_arch_setup ()
 {
   current_process ()->tdesc = nanomips_read_description ();
+}
+
+bool nanomips_target::low_cannot_fetch_register (int regno)
+{
+  return true;
+}
+
+bool nanomips_target::low_cannot_store_register (int regno)
+{
+  return true;
+}
+
+bool nanomips_target::low_supports_breakpoints ()
+{
+  return true;
 }
 
 #ifdef NANOMIPS_WATCHPOINTS
@@ -136,16 +203,16 @@ struct arch_lwp_info
 };
 #endif /* NANOMIPS_WATCHPOINTS */
 
-static CORE_ADDR
-nanomips_get_pc (struct regcache *regcache)
+CORE_ADDR
+nanomips_target::low_get_pc (struct regcache *regcache)
 {
   union nanomips_register pc;
   collect_register_by_name (regcache, "pc", pc.buf);
   return register_size (regcache->tdesc, 0) == 4 ? pc.reg32 : pc.reg64;
 }
 
-static void
-nanomips_set_pc (struct regcache *regcache, CORE_ADDR pc)
+void
+nanomips_target::low_set_pc (struct regcache *regcache, CORE_ADDR pc)
 {
   union nanomips_register newpc;
   if (register_size (regcache->tdesc, 0) == 4)
@@ -162,25 +229,25 @@ static const unsigned int nanomips_breakpoint = 0x0005000d;
 
 /* Implementation of linux_target_ops method "sw_breakpoint_from_kind".  */
 
-static const gdb_byte *
-nanomips_sw_breakpoint_from_kind (int kind, int *size)
+const gdb_byte *
+nanomips_target::sw_breakpoint_from_kind (int kind, int *size)
 {
   *size = nanomips_breakpoint_len;
   return (const gdb_byte *) &nanomips_breakpoint;
 }
 
-static int
-nanomips_breakpoint_at (CORE_ADDR where)
+bool
+nanomips_target::low_breakpoint_at (CORE_ADDR where)
 {
   unsigned int insn;
 
-  (*the_target->read_memory) (where, (unsigned char *) &insn, 4);
+  read_memory (where, (unsigned char *) &insn, 4);
   if (insn == nanomips_breakpoint)
-    return 1;
+    return true;
 
   /* If necessary, recognize more trap instructions here.  GDB only uses the
      one.  */
-  return 0;
+  return false;
 }
 
 #ifdef NANOMIPS_WATCHPOINTS
@@ -214,8 +281,8 @@ update_watch_registers_callback (struct inferior_list_entry *entry,
 /* This is the implementation of linux_target_ops method
    new_process.  */
 
-static struct arch_process_info *
-nanomips_linux_new_process (void)
+arch_process_info *
+nanomips_target::low_new_process ()
 {
   struct arch_process_info *info = XCNEW (struct arch_process_info);
 
@@ -226,8 +293,8 @@ nanomips_linux_new_process (void)
    Mark the watch registers as changed, so the threads' copies will
    be updated.  */
 
-static void
-nanomips_linux_new_thread (struct lwp_info *lwp)
+void
+nanomips_target::low_new_thread (lwp_info *lwp)
 {
   struct arch_lwp_info *info = XCNEW (struct arch_lwp_info);
 
@@ -259,9 +326,9 @@ nanomips_add_watchpoint (struct arch_process_info *priv, CORE_ADDR addr, int len
 
 /* Hook to call when a new fork is attached.  */
 
-static void
-nanomips_linux_new_fork (struct process_info *parent,
-			 struct process_info *child)
+void
+nanomips_target::low_new_fork (process_info *parent,
+			 process_info *child)
 {
   struct arch_process_info *parent_private;
   struct arch_process_info *child_private;
@@ -303,7 +370,7 @@ nanomips_linux_new_fork (struct process_info *parent,
    thread's copies.  */
 
 static void
-nanomips_linux_prepare_to_resume (struct lwp_info *lwp)
+nanomips_target::low_prepare_to_resume (lwp_info *lwp)
 {
   ptid_t ptid = ptid_of (get_lwp_thread (lwp));
   struct process_info *proc = find_process_pid (ptid_get_pid (ptid));
@@ -327,8 +394,8 @@ nanomips_linux_prepare_to_resume (struct lwp_info *lwp)
     }
 }
 
-static int
-nanomips_supports_z_point_type (char z_type)
+bool
+nanomips_target::supports_z_point_type (char z_type)
 {
   switch (z_type)
     {
@@ -344,8 +411,8 @@ nanomips_supports_z_point_type (char z_type)
 /* This is the implementation of linux_target_ops method
    insert_point.  */
 
-static int
-nanomips_insert_point (enum raw_bkpt_type type, CORE_ADDR addr,
+int
+nanomips_target::low_insert_point (enum raw_bkpt_type type, CORE_ADDR addr,
 		   int len, struct raw_breakpoint *bp)
 {
   struct process_info *proc = current_process ();
@@ -391,8 +458,8 @@ nanomips_insert_point (enum raw_bkpt_type type, CORE_ADDR addr,
 /* This is the implementation of linux_target_ops method
    remove_point.  */
 
-static int
-nanomips_remove_point (enum raw_bkpt_type type, CORE_ADDR addr,
+int
+nanomips_target::low_remove_point (enum raw_bkpt_type type, CORE_ADDR addr,
 		   int len, struct raw_breakpoint *bp)
 {
   struct process_info *proc = current_process ();
@@ -442,8 +509,8 @@ nanomips_remove_point (enum raw_bkpt_type type, CORE_ADDR addr,
    stopped_by_watchpoint.  The watchhi R and W bits indicate
    the watch register triggered. */
 
-static int
-nanomips_stopped_by_watchpoint (void)
+bool
+nanomips_target::low_stopped_by_watchpoint (void)
 {
   struct process_info *proc = current_process ();
   struct arch_process_info *priv = proc->priv->arch_private;
@@ -470,8 +537,8 @@ nanomips_stopped_by_watchpoint (void)
 /* This is the implementation of linux_target_ops method
    stopped_data_address.  */
 
-static CORE_ADDR
-nanomips_stopped_data_address (void)
+CORE_ADDR
+nanomips_target::low_stopped_data_address ()
 {
   struct process_info *proc = current_process ();
   struct arch_process_info *priv = proc->priv->arch_private;
@@ -556,10 +623,20 @@ nanomips_fill_gregset (struct regcache *regcache, void *ptr)
   gdb_byte *buf = (gdb_byte *) ptr;
   int i;
 
+  /* FIXME: Remove padding.  */
+  if (regsize == 4)
+    buf += NANOMIPS_EF_PAD * regsize;
+  else
+    buf += NANOMIPS64_EF_PAD * regsize;
+
   collect_register_by_name (regcache, "restart", buf);
   buf += regsize;
   for (i = 1; i < 32; i++, gpr++, buf += regsize)
     collect_register (regcache, gpr, buf);
+
+  /* FIXME: Remove padding.  */
+  buf += 2 * regsize;
+
   collect_register_by_name (regcache, "pc", buf);
   buf += regsize;
   collect_register_by_name (regcache, "badvaddr", buf);
@@ -579,11 +656,21 @@ nanomips_store_gregset (struct regcache *regcache, const void *ptr)
   nanomips64_elf_greg_t zerobuf = { 0 };
   int i;
 
+  /* FIXME: Remove padding.  */
+  if (regsize == 4)
+    buf += NANOMIPS_EF_PAD * regsize;
+  else
+    buf += NANOMIPS64_EF_PAD * regsize;
+
   supply_register_by_name (regcache, "restart", buf);
   buf += regsize;
   supply_register_by_name (regcache, "r0", zerobuf);
   for (i = 1; i < 32; i++, gpr++, buf += regsize)
     supply_register (regcache, gpr, buf);
+
+  /* FIXME: Remove padding.  */
+  buf += 2 * regsize;
+
   supply_register_by_name (regcache, "pc", buf);
   buf += regsize;
   supply_register_by_name (regcache, "badvaddr", buf);
@@ -727,8 +814,8 @@ static struct regs_info nanomips64_dsp_regs =
     &nanomips64_dsp_regsets_info
   };
 
-static const struct regs_info *
-nanomips_regs_info (void)
+const regs_info *
+nanomips_target::get_regs_info ()
 {
   if (have_64bit)
     return have_dsp ? &nanomips64_dsp_regs : &nanomips64_regs;
@@ -736,34 +823,10 @@ nanomips_regs_info (void)
     return have_dsp ? &nanomips_dsp_regs : &nanomips_regs;
 }
 
-struct linux_target_ops the_low_target = {
-  nanomips_arch_setup,
-  nanomips_regs_info,
-  NULL, /* cannot_fetch_register */
-  NULL, /* cannot_store_register */
-  NULL, /* fetch_register */
-  nanomips_get_pc,
-  nanomips_set_pc,
-  NULL, /* breakpoint_kind_from_pc */
-  nanomips_sw_breakpoint_from_kind,
-  NULL, /* get_next_pcs */
-  0,
-  nanomips_breakpoint_at,
-#ifdef NANOMIPS_WATCHPOINTS
-  nanomips_supports_z_point_type,
-  nanomips_insert_point,
-  nanomips_remove_point,
-  nanomips_stopped_by_watchpoint,
-  nanomips_stopped_data_address,
-  NULL,
-  NULL,
-  NULL, /* siginfo_fixup */
-  nanomips_linux_new_process,
-  nanomips_linux_new_thread,
-  nanomips_linux_new_fork,
-  nanomips_linux_prepare_to_resume
-#endif /* NANOMIPS_WATCHPOINTS */
-};
+/* The linux target ops object.  */
+
+linux_process_target *the_linux_target = &the_nanomips_target;
+
 
 void
 initialize_low_arch (void)

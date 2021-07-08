@@ -129,7 +129,8 @@ enum
 };
 
 /* Single step based on where the current instruction will take us.  */
-extern VEC (CORE_ADDR) *nanomips_software_single_step (struct regcache *regcache);
+extern std::vector<CORE_ADDR>
+nanomips_software_single_step (struct regcache *regcache);
 
 /* Return the currently determined ISA register size.  */
 extern int nanomips_isa_regsize (struct gdbarch *gdbarch);

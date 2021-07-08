@@ -52,10 +52,11 @@
 #include "floatformat.h"
 #include "remote.h"
 #include "target-descriptions.h"
-#include "dwarf2-frame.h"
+#include "dwarf2/frame.h"
 #include "user-regs.h"
 #include "valprint.h"
 #include "ax.h"
+#include "target-float.h"
 #include <algorithm>
 
 #include "features/nanomips.c"
@@ -223,11 +224,9 @@ nanomips_xfer_register (struct gdbarch *gdbarch, struct regcache *regcache,
   fprintf_unfiltered (gdb_stdlog, "%02x", out[buf_offset + i]);
     }
   if (in != NULL)
-    regcache_cooked_read_part (regcache, reg_num, reg_offset, length,
-             in + buf_offset);
+    regcache->cooked_read_part (reg_num, reg_offset, length, in + buf_offset);
   if (out != NULL)
-    regcache_cooked_write_part (regcache, reg_num, reg_offset, length,
-        out + buf_offset);
+    regcache->cooked_write_part (reg_num, reg_offset, length, out + buf_offset);
   if (nanomips_debug && in != NULL)
     {
       int i;
@@ -243,7 +242,7 @@ nanomips_xfer_register (struct gdbarch *gdbarch, struct regcache *regcache,
 
 static CORE_ADDR heuristic_proc_start (struct gdbarch *, CORE_ADDR);
 
-static void reinit_frame_cache_sfunc (char *, int, struct cmd_list_element *);
+static void reinit_frame_cache_sfunc (const char *, int, struct cmd_list_element *);
 
 /* The list of available "set nanomips " and "show nanomips " commands.  */
 
@@ -367,14 +366,14 @@ nanomips_tdesc_register_reggroup_p (struct gdbarch *gdbarch, int regnum,
 
 static enum register_status
 nanomips_pseudo_register_read (struct gdbarch *gdbarch,
-			       struct regcache *regcache,
+			       struct readable_regcache *regcache,
 			       int cookednum, gdb_byte *buf)
 {
   int rawnum = cookednum % gdbarch_num_regs (gdbarch);
   gdb_assert (cookednum >= gdbarch_num_regs (gdbarch)
 	      && cookednum < 2 * gdbarch_num_regs (gdbarch));
   if (register_size (gdbarch, rawnum) == register_size (gdbarch, cookednum))
-    return regcache_raw_read (regcache, rawnum, buf);
+    return regcache->raw_read (rawnum, buf);
   else if (register_size (gdbarch, rawnum) >
 	   register_size (gdbarch, cookednum))
     {
@@ -382,7 +381,7 @@ nanomips_pseudo_register_read (struct gdbarch *gdbarch,
       LONGEST regval;
       enum register_status status;
 
-      status = regcache_raw_read_signed (regcache, rawnum, &regval);
+      status = regcache->raw_read (rawnum, &regval);
       if (status == REG_VALID)
         store_signed_integer (buf, 4, byte_order, regval);
       return status;
@@ -400,7 +399,7 @@ nanomips_pseudo_register_write (struct gdbarch *gdbarch,
   gdb_assert (cookednum >= gdbarch_num_regs (gdbarch)
 	      && cookednum < 2 * gdbarch_num_regs (gdbarch));
   if (register_size (gdbarch, rawnum) == register_size (gdbarch, cookednum))
-    regcache_raw_write (regcache, rawnum, buf);
+    regcache->raw_write (rawnum, buf);
   else if (register_size (gdbarch, rawnum) >
 	   register_size (gdbarch, cookednum))
     {
@@ -478,7 +477,7 @@ nanomips_convert_register_float_case_p (struct gdbarch *gdbarch, int regnum,
 {
   return (register_size (gdbarch, regnum) == 8
 	  && nanomips_float_register_p (gdbarch, regnum)
-	  && TYPE_CODE (type) == TYPE_CODE_FLT && TYPE_LENGTH (type) == 4);
+	  && type->code () == TYPE_CODE_FLT && TYPE_LENGTH (type) == 4);
 }
 
 /* This predicate tests for the case of a value of less than 8
@@ -705,12 +704,12 @@ show_mask_address (struct ui_file *file, int from_tty,
    all registers should be sign extended for simplicity?  */
 
 static CORE_ADDR
-nanomips_read_pc (struct regcache *regcache)
+nanomips_read_pc (struct readable_regcache *regcache)
 {
-  int regnum = gdbarch_pc_regnum (get_regcache_arch (regcache));
+  int regnum = gdbarch_pc_regnum (regcache->arch ());
   LONGEST pc;
 
-  regcache_cooked_read_signed (regcache, regnum, &pc);
+  regcache->cooked_read (regnum, &pc);
   return pc;
 }
 
@@ -748,7 +747,7 @@ nanomips_dummy_id (struct gdbarch *gdbarch, struct frame_info *this_frame)
 void
 nanomips_write_pc (struct regcache *regcache, CORE_ADDR pc)
 {
-  int regnum = gdbarch_pc_regnum (get_regcache_arch (regcache));
+  int regnum = gdbarch_pc_regnum (regcache->arch ());
   regcache_cooked_write_unsigned (regcache, regnum, pc);
 }
 
@@ -853,7 +852,7 @@ nanomips_insn_size (ULONGEST insn)
 static CORE_ADDR
 nanomips_next_pc (struct regcache *regcache, CORE_ADDR pc)
 {
-  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch *gdbarch = regcache->arch ();
   ULONGEST insn;
   CORE_ADDR offset, sp, ra;
   int op, sreg, treg, uimm, count;
@@ -1559,13 +1558,13 @@ nanomips_addr_bits_remove (struct gdbarch *gdbarch, CORE_ADDR addr)
    is found, attempt to step through it.  A breakpoint is placed at the end of
    the sequence.  */
 
-static VEC (CORE_ADDR) *
+static std::vector<CORE_ADDR>
 nanomips_deal_with_atomic_sequence (struct gdbarch *gdbarch,
 				    CORE_ADDR pc)
 {
   const int atomic_sequence_length = 16; /* Instruction sequence length.  */
   int last_breakpoint = 0; /* Defaults to 0 (no breakpoints placed).  */
-  CORE_ADDR breaks[2] = {-1, -1};
+  CORE_ADDR breaks[2] = {CORE_ADDR_MAX, CORE_ADDR_MAX};
   CORE_ADDR branch_bp = 0; /* Breakpoint at branch instruction's
 			      destination.  */
   CORE_ADDR loc = pc;
@@ -1573,17 +1572,16 @@ nanomips_deal_with_atomic_sequence (struct gdbarch *gdbarch,
   ULONGEST insn;
   int insn_count;
   int index;
-  VEC (CORE_ADDR) *next_pcs = NULL;
 
   /* Assume all atomic sequences start with a ll/lld instruction.  */
   insn = nanomips_fetch_instruction (gdbarch, loc, NULL);
   if (micromips_op (insn) != 0x29)	/* P.LL: bits 101001 */
-    return NULL;
+    return {};
   loc += INSN16_SIZE;
   insn <<= 16;
   insn |= nanomips_fetch_instruction (gdbarch, loc, NULL);
   if (b8s7_op (insn) != 0x51)	/* LL: bits 101001 1010 0 01 */
-    return NULL;
+    return {};
   loc += INSN16_SIZE;
 
   /* Assume all atomic sequences end with an sc/scd instruction.  Assume
@@ -1622,14 +1620,14 @@ nanomips_deal_with_atomic_sequence (struct gdbarch *gdbarch,
 	    case 0x12:
 	      op = b12s4_op (insn);
 	      if (op == 0x8) /* BALRC, BALRSC */
-		return NULL; /* Fall back to the standard single-step code. */
+		return {}; /* Fall back to the standard single-step code. */
 	      else if (op == 0 || op == 1) /* JALRC JALRC.HB */
-		return NULL; /* Fall back to the standard single-step code. */
+		return {}; /* Fall back to the standard single-step code. */
 	      break;
 
 	    case 0x20: /* PP.SR */
 	      if (b12s5_op (insn) == 0x13) /* RESTORE.JRC */
-		return NULL; /* Fall back to the standard single-step code. */
+		return {}; /* Fall back to the standard single-step code. */
 	      break;
 
 	    case 0x22: /* P.BR1 */
@@ -1695,7 +1693,7 @@ nanomips_deal_with_atomic_sequence (struct gdbarch *gdbarch,
 
 	    case 0x7: /* RESTORE.JRC[16] */
 	      if ((insn & 1) == 0 && (insn & 0x20) == 0x20)
-		return NULL; /* Fall back to the standard single-step code. */
+		return {}; /* Fall back to the standard single-step code. */
 	      break;
 
 	    case 0x26: /* BEQZC[16] */
@@ -1715,7 +1713,7 @@ nanomips_deal_with_atomic_sequence (struct gdbarch *gdbarch,
 		  is_branch = 1;
 		}
 	      else if (offset == 0) /* JALRC[16] JRC */
-		return NULL; /* Fall back to the standard single-step code. */
+		return {}; /* Fall back to the standard single-step code. */
 	      break;
 	    }
 	  break;
@@ -1724,14 +1722,14 @@ nanomips_deal_with_atomic_sequence (struct gdbarch *gdbarch,
       if (is_branch)
 	{
 	  if (last_breakpoint >= 1)
-	    return NULL; /* More than one branch found, fallback to the
+	    return {}; /* More than one branch found, fallback to the
 			 standard single-step code.  */
 	  breaks[1] = branch_bp;
 	  last_breakpoint++;
 	}
     }
   if (!sc_found)
-    return NULL;
+    return {};
 
   /* Insert a breakpoint right after the end of the atomic sequence.  */
   breaks[0] = loc;
@@ -1741,9 +1739,11 @@ nanomips_deal_with_atomic_sequence (struct gdbarch *gdbarch,
   if (last_breakpoint && pc <= breaks[1] && breaks[1] <= breaks[0])
     last_breakpoint = 0;
 
+  std::vector<CORE_ADDR> next_pcs;
+
   /* Effectively inserts the breakpoints.  */
   for (index = 0; index <= last_breakpoint; index++)
-    VEC_safe_push (CORE_ADDR, next_pcs, breaks[index]);
+    next_pcs.push_back (breaks[index]);
 
   return next_pcs;
 }
@@ -1753,22 +1753,22 @@ nanomips_deal_with_atomic_sequence (struct gdbarch *gdbarch,
    or kernel single-step support (nanoMIPS on GNU/Linux for example).  We find
    the target of the coming instruction and breakpoint it.  */
 
-VEC (CORE_ADDR) *
+std::vector<CORE_ADDR>
 nanomips_software_single_step (struct regcache *regcache)
 {
-  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch *gdbarch = regcache->arch ();
   CORE_ADDR pc, next_pc;
-  VEC (CORE_ADDR) *next_pcs;
 
   pc = regcache_read_pc (regcache);
-  next_pcs = nanomips_deal_with_atomic_sequence (gdbarch, pc);
-  if (next_pcs != NULL)
+  std::vector<CORE_ADDR> next_pcs =
+			nanomips_deal_with_atomic_sequence (gdbarch, pc);
+
+  if (!next_pcs.empty ())
     return next_pcs;
 
   next_pc = nanomips_next_pc (regcache, pc);
 
-  VEC_safe_push (CORE_ADDR, next_pcs, next_pc);
-  return next_pcs;
+  return {next_pc};
 }
 
 /* This fencepost looks highly suspicious to me.  Removing it also
@@ -1860,24 +1860,24 @@ heuristic-fence-post' command.\n",
 static int
 type_needs_double_align (struct type *type)
 {
-  enum type_code typecode = TYPE_CODE (type);
+  enum type_code typecode = type->code ();
 
   if ((typecode == TYPE_CODE_FLT || typecode == TYPE_CODE_INT)
       && TYPE_LENGTH (type) == 8)
     return 1;
   else if (typecode == TYPE_CODE_STRUCT)
     {
-      if (TYPE_NFIELDS (type) > 1)
+      if (type->num_fields () > 1)
 	return 0;
-      return type_needs_double_align (TYPE_FIELD_TYPE (type, 0));
+      return type_needs_double_align (type->field (0).type ());
     }
   else if (typecode == TYPE_CODE_UNION)
     {
       int i, n;
 
-      n = TYPE_NFIELDS (type);
+      n = type->num_fields ();
       for (i = 0; i < n; i++)
-	if (type_needs_double_align (TYPE_FIELD_TYPE (type, i)))
+	if (type_needs_double_align (type->field (i).type ()))
 	  return 1;
       return 0;
     }
@@ -1920,7 +1920,7 @@ static CORE_ADDR
 nanomips_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
 			  struct regcache *regcache, CORE_ADDR bp_addr,
 			  int nargs, struct value **args, CORE_ADDR sp,
-			  int struct_return, CORE_ADDR struct_addr)
+			  function_call_return_method return_method, CORE_ADDR struct_addr)
 {
   int arg_gpr = 0, arg_fpr = 0;
   int argnum;
@@ -1960,7 +1960,7 @@ nanomips_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
     fprintf_unfiltered (gdb_stdlog, "nanomips_push_dummy_call (stack_size=%d)\n", stack_size);
 
   /* The struct_return pointer occupies the first parameter-passing reg.  */
-  if (struct_return)
+  if (return_method == return_method_struct)
     {
       if (nanomips_debug)
 	fprintf_unfiltered (gdb_stdlog,
@@ -1981,21 +1981,21 @@ nanomips_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
   for (argnum = 0; argnum < nargs; argnum++)
     {
       const gdb_byte *val;
-      gdb_byte valbuf[MAX_REGISTER_SIZE];
+      gdb_byte valbuf[NANOMIPS64_REGSIZE];
       struct value *arg = args[argnum];
       struct type *arg_type = check_typedef (value_type (arg));
       int len = TYPE_LENGTH (arg_type);
-      enum type_code typecode = TYPE_CODE (arg_type);
+      enum type_code typecode = arg_type->code ();
 
-      if (typecode == TYPE_CODE_STRUCT && TYPE_NFIELDS (arg_type) == 1)
+      if (typecode == TYPE_CODE_STRUCT && arg_type->num_fields () == 1)
       {
-          if (TYPE_CODE (TYPE_FIELD_TYPE (arg_type, 0)) == TYPE_CODE_TYPEDEF)
+          if ((arg_type->field (0).type ())->code () == TYPE_CODE_TYPEDEF)
             {
-              struct type *type = check_typedef (TYPE_FIELD_TYPE (arg_type, 0));
-              typecode = TYPE_CODE (type);
+              struct type *type = check_typedef (arg_type->field (0).type ());
+              typecode = type->code ();
               len = TYPE_LENGTH (arg_type);
             }
-          else if (TYPE_CODE (TYPE_FIELD_TYPE (arg_type, 0)) == TYPE_CODE_FLT)
+          else if ((arg_type->field (0).type ())->code () == TYPE_CODE_FLT)
             {
               typecode = TYPE_CODE_FLT;
             }
@@ -2137,13 +2137,13 @@ nanomips_return_value (struct gdbarch *gdbarch, struct value *function,
            struct type *type, struct regcache *regcache,
            gdb_byte *readbuf, const gdb_byte *writebuf)
 {
-  if ((TYPE_CODE (type) == TYPE_CODE_ARRAY
-      ||TYPE_CODE (type) == TYPE_CODE_STRUCT
-      || TYPE_CODE (type) == TYPE_CODE_COMPLEX)
+  if ((type->code () == TYPE_CODE_ARRAY
+      || type->code () == TYPE_CODE_STRUCT
+      || type->code () == TYPE_CODE_COMPLEX)
       && TYPE_LENGTH (type) > 2 * NANOMIPS32_REGSIZE)
     return RETURN_VALUE_STRUCT_CONVENTION;
 
-  else if (TYPE_CODE (type) == TYPE_CODE_COMPLEX
+  else if (type->code () == TYPE_CODE_COMPLEX
      && FPU_TYPE(gdbarch) == NANOMIPS_FPU_HARD)
     {
       gdb_assert (nanomips_regnum (gdbarch)->fpr != -1);
@@ -2162,7 +2162,7 @@ nanomips_return_value (struct gdbarch *gdbarch, struct value *function,
 			      readbuf, writebuf, 4);
       return RETURN_VALUE_REGISTER_CONVENTION;
     }
-  else if (TYPE_CODE (type) == TYPE_CODE_FLT
+  else if (type->code () == TYPE_CODE_FLT
      && FPU_TYPE(gdbarch) == NANOMIPS_FPU_HARD)
     {
       gdb_assert (nanomips_regnum (gdbarch)->fpr != -1);
@@ -2244,9 +2244,11 @@ print_fp_register (struct ui_file *file, struct frame_info *frame,
 {		/* Do values for FP (float) regs.  */
   struct gdbarch *gdbarch = get_frame_arch (frame);
   gdb_byte *raw_buffer;
-  double doub, flt1;	/* Doubles extracted from raw hex data.  */
-  int inv1, inv2;
+  std::string flt_str, dbl_str;
   struct value_print_options opts;
+
+  const struct type *flt_type = builtin_type (gdbarch)->builtin_float;
+  const struct type *dbl_type = builtin_type (gdbarch)->builtin_double;
 
   gdb_assert (nanomips_regnum (gdbarch)->fpr != -1);
 
@@ -2263,29 +2265,19 @@ print_fp_register (struct ui_file *file, struct frame_info *frame,
 
   /* Eight byte registers: print each one as hex, float and double.  */
   read_fp_register_single (frame, regnum, raw_buffer);
-  flt1 = unpack_double (builtin_type (gdbarch)->builtin_float,
-			raw_buffer, &inv1);
+  flt_str = target_float_to_string (raw_buffer, flt_type, "%-17.9g");
 
   read_fp_register_double (frame, regnum, raw_buffer);
-  doub = unpack_double (builtin_type (gdbarch)->builtin_double,
-			raw_buffer, &inv2);
+  dbl_str = target_float_to_string (raw_buffer, dbl_type, "%-24.17g");
 
   get_formatted_print_options (&opts, 'x');
   print_scalar_formatted (raw_buffer,
 			  builtin_type (gdbarch)->builtin_uint64,
 			  &opts, 'g', file);
 
-  fprintf_filtered (file, " flt: ");
-  if (inv1)
-    fprintf_filtered (file, "<invalid float>");
-  else
-    fprintf_filtered (file, "%-17.9g", flt1);
+  fprintf_filtered (file, " flt: %s", flt_str.c_str ());
 
-  fprintf_filtered (file, " dbl: ");
-  if (inv2)
-    fprintf_filtered (file, "<invalid double>");
-  else
-    fprintf_filtered (file, "%-24.17g", doub);
+  fprintf_filtered (file, " dbl: %s", dbl_str.c_str ());
 }
 
 static void
@@ -2316,10 +2308,7 @@ nanomips_print_register (struct ui_file *file, struct frame_info *frame,
     fprintf_filtered (file, ": ");
 
   get_formatted_print_options (&opts, 'x');
-  val_print_scalar_formatted (value_type (val),
-			      value_embedded_offset (val),
-			      val,
-			      &opts, 0, file);
+  value_print_scalar_formatted (val, &opts, 0, file);
 }
 
 /* Print IEEE exception condition bits in FLAGS.  */
@@ -2435,7 +2424,7 @@ print_gp_register_row (struct ui_file *file, struct frame_info *frame,
 {
   struct gdbarch *gdbarch = get_frame_arch (frame);
   /* Do values for GP (int) regs.  */
-  gdb_byte raw_buffer[MAX_REGISTER_SIZE];
+  gdb_byte raw_buffer[NANOMIPS64_REGSIZE];
   int ncols = (nanomips_abi_regsize (gdbarch) == 8 ? 4 : 8);    /* display cols
 							       per row.  */
   int col, byte;
@@ -2738,13 +2727,13 @@ nanomips_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
    used for all nanoMIPS-specific commands.  */
 
 static void
-show_nanomips_command (char *args, int from_tty)
+show_nanomips_command (const char *args, int from_tty)
 {
   help_list (shownanomipscmdlist, "show nanomips ", all_commands, gdb_stdout);
 }
 
 static void
-set_nanomips_command (char *args, int from_tty)
+set_nanomips_command (const char *args, int from_tty)
 {
   printf_unfiltered
     ("\"set nanomips\" must be followed by an appropriate subcommand.\n");
@@ -2755,7 +2744,7 @@ set_nanomips_command (char *args, int from_tty)
    callable as an sfunc.  */
 
 static void
-reinit_frame_cache_sfunc (char *args, int from_tty,
+reinit_frame_cache_sfunc (const char *args, int from_tty,
 			  struct cmd_list_element *c)
 {
   reinit_frame_cache ();
@@ -2978,7 +2967,7 @@ nanomips_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
       tdesc_data_cleanup (tdesc_data);
       return NULL;
     }
-  register_size = tdesc_register_size (feature, "r0") / 8;
+  register_size = tdesc_register_bitsize (feature, "r0") / 8;
 
   /* All the remaining target description features are optional.  */
 
@@ -3288,7 +3277,7 @@ nanomips_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
 
   /* Hook in OS ABI-specific overrides, if they have been registered.  */
   info.target_desc = tdesc;
-  info.tdep_info = (void *) tdesc_data;
+  info.tdep_info = (struct gdbarch_tdep_info *) tdesc_data;
   gdbarch_init_osabi (info, gdbarch);
 
   /* Unwind the frame.  */

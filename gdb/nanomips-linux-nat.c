@@ -36,6 +36,20 @@
 
 #include <sys/uio.h>
 
+#include "gregset.h"
+
+class nanomips_linux_nat_target final : public linux_nat_target
+{
+public:
+  void fetch_registers (struct regcache *, int) override;
+  void store_registers (struct regcache *, int) override;
+
+  const struct target_desc *read_description () override;
+};
+
+static nanomips_linux_nat_target the_nanomips_linux_nat_target;
+
+
 /* Fetch the thread-local storage pointer for libthread_db.  */
 
 ps_err_e
@@ -145,19 +159,16 @@ nanomips_linux_ptrace_regset (struct gdbarch* gdbarch, int regnum)
   return 0;
 }
 
-static void
-nanomips_linux_fetch_registers (struct target_ops *ops,
-				struct regcache *regcache, int regnum)
+void
+nanomips_linux_nat_target::fetch_registers (struct regcache *regcache, int regno)
 {
-  struct gdbarch *gdbarch = get_regcache_arch (regcache);
-  LONGEST regset = nanomips_linux_ptrace_regset (gdbarch, regnum);
+  struct gdbarch *gdbarch = regcache->arch ();
+  LONGEST regset = nanomips_linux_ptrace_regset (gdbarch, regno);
   int tid;
 
-  tid = ptid_get_lwp (inferior_ptid);
-  if (tid == 0)
-    tid = ptid_get_pid (inferior_ptid);
+  tid = get_ptrace_pid (regcache->ptid ());
 
-  if (regnum == -1 || regset == NT_PRSTATUS)
+  if (regno == -1 || regset == NT_PRSTATUS)
     {
       gdb_byte buf[sizeof (nanomips64_elf_gregset_t)];
       struct iovec iovec;
@@ -176,7 +187,7 @@ nanomips_linux_fetch_registers (struct target_ops *ops,
       nanomips_linux_supply_gregset (regcache, buf);
     }
 
-  if (regnum == -1 || regset == NT_FPREGSET)
+  if (regno == -1 || regset == NT_FPREGSET)
     {
       gdb_byte buf[sizeof (nanomips_elf_fpregset_t)];
       struct iovec iovec;
@@ -190,23 +201,20 @@ nanomips_linux_fetch_registers (struct target_ops *ops,
       nanomips_linux_supply_fpregset (regcache, buf);
     }
 
-  if (regnum == -1 /*|| regset == NT_NANOMIPS_DSP*/)
+  if (regno == -1 /*|| regset == NT_NANOMIPS_DSP*/)
     {
       /* FIXME: Need to implement DSP regset.  */
     }
 }
 
-static void
-nanomips_linux_store_registers (struct target_ops *ops,
-				struct regcache *regcache, int regnum)
+void
+nanomips_linux_nat_target::store_registers (struct regcache *regcache, int regnum)
 {
-  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch *gdbarch = regcache->arch ();
   LONGEST regset = nanomips_linux_ptrace_regset (gdbarch, regnum);
   int tid;
 
-  tid = ptid_get_lwp (inferior_ptid);
-  if (tid == 0)
-    tid = ptid_get_pid (inferior_ptid);
+  tid = get_ptrace_pid (regcache->ptid ());
 
   if (regnum == -1 || regset == NT_PRSTATUS)
     {
@@ -247,8 +255,8 @@ nanomips_linux_store_registers (struct target_ops *ops,
     }
 }
 
-static const struct target_desc *
-nanomips_linux_read_description (struct target_ops *ops)
+const struct target_desc *
+nanomips_linux_nat_target::read_description ()
 {
   gdb_byte buf[sizeof (nanomips64_elf_gregset_t)];
   int have_64bit = -1;
@@ -256,9 +264,7 @@ nanomips_linux_read_description (struct target_ops *ops)
   int have_dsp = -1;
   int tid;
 
-  tid = ptid_get_lwp (inferior_ptid);
-  if (tid == 0)
-    tid = ptid_get_pid (inferior_ptid);
+  tid = get_ptrace_pid (inferior_ptid);
 
   /* Trying to retrieve the amount of NT_PRSTATUS data corresponding
      to this regset's 64-bit size will fail with a 32-bit inferior.  */
@@ -266,7 +272,7 @@ nanomips_linux_read_description (struct target_ops *ops)
   iovec.iov_len = sizeof (buf);
 
   if (ptrace (PTRACE_GETREGSET, tid, NT_PRSTATUS, &iovec) == 0)
-    have_64bit = 1;
+    have_64bit = iovec.iov_len >= sizeof(buf);
   else if (errno == EIO)
     have_64bit = 0;
   else
@@ -286,14 +292,6 @@ void _initialize_nanomips_linux_nat (void);
 void
 _initialize_nanomips_linux_nat (void)
 {
-  struct target_ops *t;
-
-  t = linux_target ();
-
-  t->to_fetch_registers = nanomips_linux_fetch_registers;
-  t->to_store_registers = nanomips_linux_store_registers;
-
-  t->to_read_description = nanomips_linux_read_description;
-
-  linux_nat_add_target (t);
+  linux_target = &the_nanomips_linux_nat_target;
+  add_inf_child_target (&the_nanomips_linux_nat_target);
 }

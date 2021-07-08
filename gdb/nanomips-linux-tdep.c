@@ -43,7 +43,7 @@
 void
 nanomips_linux_supply_gregset (struct regcache *regcache, const gdb_byte *buf)
 {
-  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch *gdbarch = regcache->arch ();
   const struct nanomips_regnum *regs = nanomips_regnum (gdbarch);
   int regsize = nanomips_isa_regsize (gdbarch);
   nanomips64_elf_greg_t zerobuf = { 0 };
@@ -55,29 +55,29 @@ nanomips_linux_supply_gregset (struct regcache *regcache, const gdb_byte *buf)
   else
     buf += NANOMIPS64_EF_PAD * regsize;
 
-  regcache_raw_supply (regcache, NANOMIPS_ZERO_REGNUM, zerobuf);
+  regcache->raw_supply (NANOMIPS_ZERO_REGNUM, zerobuf);
 
   if (regs->restart != -1)
-    regcache_raw_supply (regcache, regs->restart, buf);
+    regcache->raw_supply (regs->restart, buf);
   buf += regsize;
 
   for (i = 0; i < 31; i++, buf += regsize)
-    regcache_raw_supply (regcache, NANOMIPS_AT_REGNUM + i, buf);
+    regcache->raw_supply (NANOMIPS_AT_REGNUM + i, buf);
 
   /* FIXME: Remove padding.  */
   buf += 2 * regsize;
 
-  regcache_raw_supply (regcache, NANOMIPS_PC_REGNUM, buf);
+  regcache->raw_supply (NANOMIPS_PC_REGNUM, buf);
   buf += regsize;
 
   if (regs->badvaddr != -1)
-    regcache_raw_supply (regcache, regs->badvaddr, buf);
+    regcache->raw_supply (regs->badvaddr, buf);
   buf += regsize;
   if (regs->status != -1)
-    regcache_raw_supply (regcache, regs->status, buf);
+    regcache->raw_supply (regs->status, buf);
   buf += regsize;
   if (regs->cause != -1)
-    regcache_raw_supply (regcache, regs->cause, buf);
+    regcache->raw_supply (regs->cause, buf);
 }
 
 /* Wrapper for the above for the core file regset iterator.  */
@@ -87,7 +87,7 @@ nanomips_linux_supply_gregset_wrapper (const struct regset *regset,
 				       struct regcache *regcache, int regnum,
 				       const void *gregs, size_t len)
 {
-  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch *gdbarch = regcache->arch ();
   int regsize = nanomips_isa_regsize (gdbarch);
 
   gdb_assert (len >= (regsize == 4 ? sizeof (nanomips_elf_gregset_t)
@@ -102,7 +102,7 @@ nanomips_linux_supply_gregset_wrapper (const struct regset *regset,
 void
 nanomips_linux_collect_gregset (const struct regcache *regcache, gdb_byte *buf)
 {
-  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch *gdbarch = regcache->arch ();
   const struct nanomips_regnum *regs = nanomips_regnum (gdbarch);
   int regsize = nanomips_isa_regsize (gdbarch);
   int i;
@@ -116,26 +116,27 @@ nanomips_linux_collect_gregset (const struct regcache *regcache, gdb_byte *buf)
     buf += NANOMIPS64_EF_PAD * regsize;
 
   if (regs->restart != -1)
-    regcache_raw_collect (regcache, regs->restart, buf);
+    regcache->raw_collect (regs->restart, buf);
   buf += regsize;
 
   for (i = 0; i < 31; i++, buf += regsize)
-    regcache_raw_collect (regcache, NANOMIPS_AT_REGNUM + i, buf);
+    regcache->raw_collect (NANOMIPS_AT_REGNUM + i, buf);
 
   /* FIXME: Remove padding.  */
   buf += 2 * regsize;
 
-  regcache_raw_collect (regcache, NANOMIPS_PC_REGNUM, buf);
+  regcache->raw_collect (NANOMIPS_PC_REGNUM, buf);
   buf += regsize;
 
   if (regs->badvaddr != -1)
-    regcache_raw_collect (regcache, regs->badvaddr, buf);
+    regcache->raw_collect (regs->badvaddr, buf);
   buf += regsize;
   if (regs->status != -1)
-    regcache_raw_collect (regcache, regs->status, buf);
+    regcache->raw_collect (regs->status, buf);
+
   buf += regsize;
   if (regs->cause != -1)
-    regcache_raw_collect (regcache, regs->cause, buf);
+    regcache->raw_collect (regs->cause, buf);
 }
 
 /* Wrapper for the above for the core file regset iterator.  */
@@ -145,7 +146,7 @@ nanomips_linux_collect_gregset_wrapper (const struct regset *regset,
 					const struct regcache *regcache,
 					int regnum, void *gregs, size_t len)
 {
-  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch *gdbarch = regcache->arch ();
   int regsize = nanomips_isa_regsize (gdbarch);
 
   gdb_assert (len >= (regsize == 4 ? sizeof (nanomips_elf_gregset_t)
@@ -161,17 +162,17 @@ void
 nanomips_linux_supply_fpregset (struct regcache *regcache,
 				const gdb_byte *buf)
 {
-  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch *gdbarch = regcache->arch ();
   const struct nanomips_regnum *regs = nanomips_regnum (gdbarch);
   int i;
 
   gdb_assert (regs->fpr != -1);
 
   for (i = 0; i < 32; i++, buf += 8)
-    regcache_raw_supply (regcache, regs->fpr + i, buf);
-  regcache_raw_supply (regcache, regs->fpr + NANOMIPS_FCSR_REGNUM, buf);
+    regcache->raw_supply (regs->fpr + i, buf);
+  regcache->raw_supply (regs->fpr + NANOMIPS_FCSR_REGNUM, buf);
   buf += 4;
-  regcache_raw_supply (regcache, regs->fpr + NANOMIPS_FIR_REGNUM, buf);
+  regcache->raw_supply (regs->fpr + NANOMIPS_FIR_REGNUM, buf);
 }
 
 /* Wrapper for the above for the core file regset iterator.  */
@@ -193,17 +194,18 @@ void
 nanomips_linux_collect_fpregset (const struct regcache *regcache,
 				 gdb_byte *buf)
 {
-  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch *gdbarch = regcache->arch ();
   const struct nanomips_regnum *regs = nanomips_regnum (gdbarch);
   int i;
 
   gdb_assert (regs->fpr != -1);
 
   for (i = 0; i < 32; i++, buf += 8)
-    regcache_raw_collect (regcache, regs->fpr + i, buf);
-  regcache_raw_collect (regcache, regs->fpr + NANOMIPS_FCSR_REGNUM, buf);
+    regcache->raw_collect(regs->fpr + i, buf);
+  regcache->raw_collect(regs->fpr + NANOMIPS_FCSR_REGNUM, buf);
   buf += 4;
-  regcache_raw_collect (regcache, regs->fpr + NANOMIPS_FIR_REGNUM, buf);
+
+  regcache->raw_collect(regs->fpr + NANOMIPS_FIR_REGNUM, buf);
 }
 
 /* Wrapper for the above for the core file regset iterator.  */
@@ -240,11 +242,11 @@ nanomips_linux_iterate_over_regset_sections
   if (nanomips_isa_regsize (gdbarch) == 4)
     {
       cb (".reg",
-	  sizeof (nanomips_elf_gregset_t), &nanomips_linux_gregset,
-	  NULL, cb_data);
+	  sizeof (nanomips_elf_gregset_t), sizeof (nanomips_elf_gregset_t),
+	  &nanomips_linux_gregset, NULL, cb_data);
       cb (".reg2",
-	  sizeof (nanomips_elf_fpregset_t), &nanomips_linux_fpregset,
-	  NULL, cb_data);
+	  sizeof (nanomips_elf_fpregset_t), sizeof (nanomips_elf_fpregset_t),
+	  &nanomips_linux_fpregset, NULL, cb_data);
 #if 0
       cb (".reg-nanomips-dsp",
 	  sizeof (nanomips_elf_dspregset_t), &nanomips_linux_dspregset,
@@ -254,11 +256,11 @@ nanomips_linux_iterate_over_regset_sections
   else
     {
       cb (".reg",
-	  sizeof (nanomips64_elf_gregset_t), &nanomips_linux_gregset,
-	  NULL, cb_data);
+	  sizeof (nanomips64_elf_gregset_t), sizeof (nanomips64_elf_gregset_t),
+	  &nanomips_linux_gregset, NULL, cb_data);
       cb (".reg2",
-	  sizeof (nanomips_elf_fpregset_t), &nanomips_linux_fpregset,
-	  NULL, cb_data);
+	  sizeof (nanomips_elf_fpregset_t), sizeof (nanomips_elf_fpregset_t),
+	  &nanomips_linux_fpregset, NULL, cb_data);
 #if 0
       cb (".reg-nanomips-dsp",
 	  sizeof (nanomips64_elf_dspregset_t), &nanomips_linux_dspregset,
@@ -280,7 +282,7 @@ nanomips_linux_core_read_description (struct gdbarch *gdbarch,
   if (!section)
     return NULL;
 
-  switch (bfd_section_size (abfd, section))
+  switch (bfd_section_size (section))
     {
     case sizeof (nanomips_elf_gregset_t):
       have_64bit = 0;
@@ -317,11 +319,11 @@ static const struct tramp_frame nanomips_linux_p32_rt_sigframe = {
   SIGTRAMP_FRAME,
   2,
   {
-    { NANOMIPS_INST_LI_A4, -1 },
-    { NANOMIPS_NR_rt_sigreturn, -1 },
-    { NANOMIPS_INST_SYSCALL32, -1 },
-    { 0, -1 },
-    { TRAMP_SENTINEL_INSN, -1 }
+    { NANOMIPS_INST_LI_A4, ULONGEST_MAX },
+    { NANOMIPS_NR_rt_sigreturn, ULONGEST_MAX },
+    { NANOMIPS_INST_SYSCALL32, ULONGEST_MAX },
+    { 0, ULONGEST_MAX },
+    { TRAMP_SENTINEL_INSN, ULONGEST_MAX }
   },
   nanomips_linux_sigframe_init
 };
@@ -330,11 +332,11 @@ static const struct tramp_frame nanomips_linux_p64_rt_sigframe = {
   SIGTRAMP_FRAME,
   2,
   {
-    { NANOMIPS_INST_LI_A4, -1 },
-    { NANOMIPS_NR_rt_sigreturn, -1 },
-    { NANOMIPS_INST_SYSCALL32, -1 },
-    { 0, -1 },
-    { TRAMP_SENTINEL_INSN, -1 }
+    { NANOMIPS_INST_LI_A4, ULONGEST_MAX },
+    { NANOMIPS_NR_rt_sigreturn, ULONGEST_MAX },
+    { NANOMIPS_INST_SYSCALL32, ULONGEST_MAX },
+    { 0, ULONGEST_MAX },
+    { TRAMP_SENTINEL_INSN, ULONGEST_MAX }
   },
   nanomips_linux_sigframe_init
 };
@@ -471,7 +473,7 @@ nanomips_linux_sigframe_init (const struct tramp_frame *self,
 
   if (self == &nanomips_linux_p32_rt_sigframe)
     sigcontext_base = P32_SIGFRAME_SIGCONTEXT_OFFSET;
-  else if (self == &nanomips_linux_p32_rt_sigframe)
+  else if (self == &nanomips_linux_p64_rt_sigframe)
     sigcontext_base = P64_SIGFRAME_SIGCONTEXT_OFFSET;
   else
     internal_error (__FILE__, __LINE__, _("unknown trampoline frame type"));
@@ -598,7 +600,7 @@ nanomips_linux_sigframe_init (const struct tramp_frame *self,
 static void
 nanomips_linux_write_pc (struct regcache *regcache, CORE_ADDR pc)
 {
-  struct gdbarch *gdbarch = get_regcache_arch (regcache);
+  struct gdbarch *gdbarch = regcache->arch ();
   const struct nanomips_regnum *regs = nanomips_regnum (gdbarch);
 
   nanomips_write_pc (regcache, pc);
@@ -629,9 +631,9 @@ nanomips_linux_syscall_next_pc (struct frame_info *frame, CORE_ADDR pc)
 
 static LONGEST
 nanomips_linux_get_syscall_number (struct gdbarch *gdbarch,
-				   ptid_t ptid)
+				   thread_info *thread)
 {
-  struct regcache *regcache = get_thread_regcache (ptid);
+  struct regcache *regcache = get_thread_regcache (thread);
   struct gdbarch_tdep *tdep = gdbarch_tdep (gdbarch);
   enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
   int regsize = register_size (gdbarch, NANOMIPS_T4_REGNUM);
@@ -648,7 +650,7 @@ nanomips_linux_get_syscall_number (struct gdbarch *gdbarch,
 
   /* Getting the system call number from the register.
      syscall number is in t4 or $2.  */
-  regcache_cooked_read (regcache, NANOMIPS_T4_REGNUM, buf);
+  regcache->cooked_read (NANOMIPS_T4_REGNUM, buf);
 
   ret = extract_signed_integer (buf, regsize, byte_order);
 
