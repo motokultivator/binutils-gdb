@@ -2232,6 +2232,7 @@ ALLDEPFILES = \
 	mips64-obsd-nat.c \
 	mips64-obsd-tdep.c \
 	msp430-tdep.c \
+	nanomips-linux-nat.c \
 	nanomips-linux-tdep.c \
 	nanomips-tdep.c \
 	nbsd-nat.c \
