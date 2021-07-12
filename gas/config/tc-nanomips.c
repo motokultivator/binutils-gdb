@@ -11253,10 +11253,10 @@ relaxed_invariable_branch_p (fragS *fragp, asection *sec)
   variable_p = (variable_p
 		&& !branch_in_range (fragp->fr_subtype, max_offset));
   if (RELAX_MD_TYPE (fragp->fr_subtype) >= RT_BRANCH_UCND
-      && RELAX_MD_TOOFAR16 (fragp->fr_subtype))
-    variable_p = (!variable_p
-		  && branch_in_range (RELAX_MD_CLEAR_TOOFAR16
-				      (fragp->fr_subtype), min_offset));
+      && RELAX_MD_TOOFAR16 (fragp->fr_subtype)
+      && !variable_p)
+    variable_p = branch_in_range (RELAX_MD_CLEAR_TOOFAR16
+				  (fragp->fr_subtype), min_offset);
 
   /* If the branch is found to be definitively fixed or variable, mark it
      so, else clear those bits and leave it for future iterations.  Note
