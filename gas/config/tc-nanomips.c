@@ -11160,7 +11160,7 @@ relaxed_invariable_branch_p (fragS *fragp, asection *sec)
 	  fragp->tc_frag_data.link_var = TRUE;
 	  fragp->tc_frag_data.relax_sop
 	    += frag_subtype_to_relax_sop (fragp->fr_subtype);
-	  fragp->tc_frag_data.relax_sink = fragp->fr_var;
+	  fragp->tc_frag_data.relax_sink += fragp->fr_var;
 	}
       return FALSE;
     }
