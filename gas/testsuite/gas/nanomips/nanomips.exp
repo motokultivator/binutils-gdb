@@ -802,6 +802,8 @@ if { [istarget nanomips*-*-*] } {
 					[arch_list_matching nanomips]
     run_dump_test_arches "relax-jumptable-secalign" "" \
 					[arch_list_matching nanomips]
+    run_dump_test_arches "relax-jumptable-insn" "" \
+					[arch_list_matching xnms]
     run_dump_test "ssdata-sections"
     run_list_test "relax-jumptable-overflow"
 }

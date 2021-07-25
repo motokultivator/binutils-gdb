@@ -573,10 +573,11 @@ static bfd_boolean nanomips_mttgpr_rc1 = FALSE;
    TOOFAR16 &&  !NEGOFF => ADDIU[32]
 
    RF tracks link-time variability of a frag. It takes one of 4 values:
-   RF_NONE: value is link-time varialbe, size is invariable
+   RF_NONE: insufficient information to decide
    RF_FIXED: link-time invariable, does not need relocation
    RF_VARIABLE: link-time variable
-   RF_NORELAX: don't care because linker relaxation is disabled
+   RF_NORELAX: frag has relaxation disabled or its worst-case relaxation
+   behavior is already accounted and not expected to change
 */
 
 /* The ordering of this enumeration matters. All entries starting
@@ -663,7 +664,10 @@ enum relax_nanomips_fix_type
 #define RELAX_MD_MARK_VARIABLE(i) (((i) & ~0x18000) \
 					 | (RF_VARIABLE << 15))
 #define RELAX_MD_CLEAR_VARIABLE(i) ((i) & ~(RF_VARIABLE << 15))
+
 #define RELAX_MD_NORELAX(i) (((i) & 0x18000) >> 15 == RF_NORELAX)
+#define RELAX_MD_MARK_NORELAX(i) (((i) & ~0x18000) \
+					 | (RF_NORELAX << 15))
 
 /* Sign-extend 16-bit value X.  */
 #define SEXT_16BIT(X) ((((X) + 0x8000) & 0xffff) - 0x8000)
@@ -11128,8 +11132,8 @@ variable_frag_p (fragS *fragp, asection *sec)
 
 /* Check if the branch at FRAGP is link-time invariable and mark it.  */
 
-static bfd_boolean
-relaxed_invariable_branch_p (fragS *fragp, asection *sec)
+static void
+mark_if_invariable_branch (fragS *fragp, asection *sec)
 {
   addressT addr;
   bfd_boolean fixed_p = FALSE;
@@ -11142,7 +11146,7 @@ relaxed_invariable_branch_p (fragS *fragp, asection *sec)
   /* Don't bother  */
   if (!nanomips_opts.minimize_relocs
       || RELAX_MD_ADDIU_P (fragp->fr_subtype))
-    return TRUE;
+    return;
 
   /* Trivially mark branches to external symbols as unfixable.  */
   if (fragp->fr_symbol
@@ -11152,17 +11156,17 @@ relaxed_invariable_branch_p (fragS *fragp, asection *sec)
     {
       if (!RELAX_MD_NORELAX (fragp->fr_subtype))
 	{
-	  fragp->fr_subtype = RELAX_MD_MARK_VARIABLE
-	    (fragp->fr_subtype);
 	  /* External reference will not change over multiple iterations.
 	     We can calculate the sop once and store it to short-circuit
 	     repeated look-ups below.  */
+	  fragp->fr_subtype = RELAX_MD_MARK_NORELAX
+	    (fragp->fr_subtype);
 	  fragp->tc_frag_data.link_var = TRUE;
 	  fragp->tc_frag_data.relax_sop
 	    += frag_subtype_to_relax_sop (fragp->fr_subtype);
 	  fragp->tc_frag_data.relax_sink += fragp->fr_var;
 	}
-      return FALSE;
+      return;
     }
 
   addr = S_GET_VALUE (fragp->fr_symbol);
@@ -11275,8 +11279,6 @@ relaxed_invariable_branch_p (fragS *fragp, asection *sec)
       fragp->fr_subtype = RELAX_MD_CLEAR_FIXED (fragp->fr_subtype);
       fragp->fr_subtype = RELAX_MD_CLEAR_VARIABLE (fragp->fr_subtype);
     }
-
-  return fixed_p;
 }
 
 /* Compute the length of a branch, and adjust the RELAX_MD_TOOFAR16
@@ -11576,8 +11578,9 @@ jump_vector_size_frag (fragS *fragP)
   if (fragP->fr_type == rs_fill)
     return fragP->fr_fix + fragP->fr_var * fragP->fr_offset;
   else
-    return (fragP->fr_fix + fragP->tc_frag_data.relax_sop);
+    return (fragP->fr_fix + fragP->fr_var + fragP->tc_frag_data.relax_sop);
 }
+
 
 /* Check if a difference vector is within a specified range.  */
 
@@ -11596,41 +11599,31 @@ jump_vector_in_range_p (symbolS *left, symbolS *right,
     {
       lfrag = symbol_get_frag (left);
       hfrag = symbol_get_frag (right);
-      if (addr_in_frag_range (lfrag, S_GET_VALUE (left)))
-	offset = (S_GET_VALUE (left)
-		  - lfrag->fr_address
-		  - jump_vector_size_frag (lfrag));
-      offset -= lfrag->tc_frag_data.relax_sop;
+      offset = (S_GET_VALUE (left)
+		- lfrag->fr_address
+		- jump_vector_size_frag (lfrag));
       lfrag = lfrag->fr_next;
       while (lfrag && lfrag != hfrag && offset >= min_offset)
 	{
 	  offset -= jump_vector_size_frag (lfrag);
 	  lfrag = lfrag->fr_next;
 	}
-      if (addr_in_frag_range (hfrag, S_GET_VALUE (right)))
-	offset -= (S_GET_VALUE (right)
-		   - hfrag->fr_address
-		   + hfrag->tc_frag_data.relax_sop);
+      offset -= (S_GET_VALUE (right) - hfrag->fr_address);
     }
   else
     {
       lfrag = symbol_get_frag (right);
       hfrag = symbol_get_frag (left);
-      if (addr_in_frag_range (lfrag, S_GET_VALUE (right)))
-	offset = (lfrag->fr_address
-		  + jump_vector_size_frag (lfrag)
-		  - S_GET_VALUE (right));
-      offset += lfrag->tc_frag_data.relax_sop;
+      offset = (lfrag->fr_address
+		+ jump_vector_size_frag (lfrag)
+		- S_GET_VALUE (right));
       lfrag = lfrag->fr_next;
       while (lfrag && lfrag != hfrag && offset <= max_offset)
 	{
 	  offset += jump_vector_size_frag (lfrag);
 	  lfrag = lfrag->fr_next;
 	}
-      if (addr_in_frag_range (hfrag, S_GET_VALUE (left)))
-	offset += (S_GET_VALUE (left)
-		   - hfrag->fr_address
-		   + hfrag->tc_frag_data.relax_sop);
+      offset += (S_GET_VALUE (left) - hfrag->fr_address);
     }
 
   return (offset >= min_offset && offset <= max_offset);
@@ -11958,7 +11951,7 @@ nanomips_relax_frag (asection *sec, fragS *fragp,
       if (!RELAX_MD_ADDIU_P (fragp->fr_subtype) != 0
 	  && !RELAX_MD_JUMPTABLE_P (fragp->fr_subtype) != 0
 	  && fragp->fr_symbol != 0)
-	relaxed_invariable_branch_p (fragp, sec);
+	mark_if_invariable_branch (fragp, sec);
       return new_var - old_var;
     }
 
