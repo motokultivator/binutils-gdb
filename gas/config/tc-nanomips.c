@@ -5652,7 +5652,7 @@ reloc_list_head_to_fix (struct nanomips_cl_insn *ip)
 
 static void
 record_insn_sops (fragS *fragP, asection *sec,
-		  bfd_reloc_code_real_type *reloc_type, bfd_boolean lapc_p)
+		  bfd_reloc_code_real_type *reloc_type)
 {
   bfd_vma rsop, rsink;
   if (explicit_reloc_label_p (fragP, sec))
@@ -5662,23 +5662,8 @@ record_insn_sops (fragS *fragP, asection *sec,
     }
   else
     {
-      if (lapc_p)
-	{
-	  if (!(nanomips_opts.ase & ASE_xNMS) || nanomips_opts.insn32)
-	  {
-	    /* lapc[32] -> lui[32] + ori[32]  */
-	    rsop = 4;
-	    rsink = 0;
-	  }
-	  else
-	    /* lapc[4] -> li[48] /  li[16]  */ 
-	    rsink = rsop = 2;  
-	}
-      else
-	{
-	  rsop = get_reloc_sop (*reloc_type);
-	  rsink = get_reloc_sink (*reloc_type);
-	}
+      rsop = get_reloc_sop (*reloc_type);
+      rsink = get_reloc_sink (*reloc_type);
     }
 
   if (rsop + rsink > 0)
@@ -5689,10 +5674,6 @@ record_insn_sops (fragS *fragP, asection *sec,
     }
 }
 
-static bfd_boolean lapc_insn_p (const char *insn)
-{
-  return (strncmp ((insn), "lapc", 4) == 0);
-}
 
 /* Output an instruction.  IP is the instruction information.
    ADDRESS_EXPR is an operand of the instruction to be used with
@@ -5875,7 +5856,6 @@ append_insn (struct nanomips_cl_insn *ip, expressionS *address_expr,
 
       if (nanomips_opts.minimize_relocs
 	  && pcrel_branch_reloc_p (*reloc_type)
-	  && !lapc_insn_p (ip->insn_mo->name)
 	  && address_expr->X_op != O_constant)
 	{
 	  enum relax_nanomips_fix_type fix_type;
@@ -5984,12 +5964,10 @@ append_insn (struct nanomips_cl_insn *ip, expressionS *address_expr,
   if (!forced_insn_length
       && !forced_insn_format
       && ((!ip->complete_p
-	   && (lapc_insn_p (ip->insn_mo->name)
-		 || !pcrel_branch_reloc_p (*reloc_type))
+	   && !pcrel_branch_reloc_p (*reloc_type)
 	   && *reloc_type < BFD_RELOC_UNUSED)
 	  || explicit_reloc_label_p (ip->frag, now_seg)))
-    record_insn_sops (ip->frag, now_seg, reloc_type,
-		      lapc_insn_p (ip->insn_mo->name));
+    record_insn_sops (ip->frag, now_seg, reloc_type);
 
   install_insn (ip);
 
@@ -11172,8 +11150,7 @@ relaxed_invariable_branch_p (fragS *fragp, asection *sec)
 	  || S_IS_WEAK (fragp->fr_symbol)
 	  || sec != S_GET_SEGMENT (fragp->fr_symbol)))
     {
-      if (!RELAX_MD_NORELAX (fragp->fr_subtype)
-	  && !RELAX_MD_VARIABLE (fragp->fr_subtype))
+      if (!RELAX_MD_NORELAX (fragp->fr_subtype))
 	{
 	  fragp->fr_subtype = RELAX_MD_MARK_VARIABLE
 	    (fragp->fr_subtype);
