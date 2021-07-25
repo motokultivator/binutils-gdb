@@ -663,7 +663,10 @@ enum relax_nanomips_fix_type
 #define RELAX_MD_MARK_VARIABLE(i) (((i) & ~0x18000) \
 					 | (RF_VARIABLE << 15))
 #define RELAX_MD_CLEAR_VARIABLE(i) ((i) & ~(RF_VARIABLE << 15))
+
 #define RELAX_MD_NORELAX(i) (((i) & 0x18000) >> 15 == RF_NORELAX)
+#define RELAX_MD_MARK_NORELAX(i) (((i) & ~0x18000) \
+					 | (RF_NORELAX << 15))
 
 /* Sign-extend 16-bit value X.  */
 #define SEXT_16BIT(X) ((((X) + 0x8000) & 0xffff) - 0x8000)
@@ -5323,7 +5326,7 @@ static const struct
   { BFD_RELOC_NANOMIPS_7_PCREL_S1,	8, 12, 10, 2 },
   { BFD_RELOC_NANOMIPS_10_PCREL_S1,	6, 10, 8, 2 },
   { BFD_RELOC_NANOMIPS_11_PCREL_S1,	8, 12, 10, 4 },
-  { BFD_RELOC_NANOMIPS_21_PCREL_S1,	6, 12, 4, 4 },
+  { BFD_RELOC_NANOMIPS_21_PCREL_S1,	6, 12, 4, 2 },
   { BFD_RELOC_NANOMIPS_25_PCREL_S1,	4, 8, 6, 4 },
   { BFD_RELOC_NANOMIPS_14_PCREL_S1,	8, 12, 10, 4 },
   { BFD_RELOC_NANOMIPS_GPREL19_S2,	6, 8, 8, 2 },
@@ -11152,11 +11155,11 @@ relaxed_invariable_branch_p (fragS *fragp, asection *sec)
     {
       if (!RELAX_MD_NORELAX (fragp->fr_subtype))
 	{
-	  fragp->fr_subtype = RELAX_MD_MARK_VARIABLE
-	    (fragp->fr_subtype);
 	  /* External reference will not change over multiple iterations.
 	     We can calculate the sop once and store it to short-circuit
 	     repeated look-ups below.  */
+	  fragp->fr_subtype = RELAX_MD_MARK_NORELAX
+	    (fragp->fr_subtype);
 	  fragp->tc_frag_data.link_var = TRUE;
 	  fragp->tc_frag_data.relax_sop
 	    += frag_subtype_to_relax_sop (fragp->fr_subtype);
@@ -11576,8 +11579,9 @@ jump_vector_size_frag (fragS *fragP)
   if (fragP->fr_type == rs_fill)
     return fragP->fr_fix + fragP->fr_var * fragP->fr_offset;
   else
-    return (fragP->fr_fix + fragP->tc_frag_data.relax_sop);
+    return (fragP->fr_fix + fragP->fr_var + fragP->tc_frag_data.relax_sop);
 }
+
 
 /* Check if a difference vector is within a specified range.  */
 
@@ -11600,7 +11604,6 @@ jump_vector_in_range_p (symbolS *left, symbolS *right,
 	offset = (S_GET_VALUE (left)
 		  - lfrag->fr_address
 		  - jump_vector_size_frag (lfrag));
-      offset -= lfrag->tc_frag_data.relax_sop;
       lfrag = lfrag->fr_next;
       while (lfrag && lfrag != hfrag && offset >= min_offset)
 	{
@@ -11609,8 +11612,7 @@ jump_vector_in_range_p (symbolS *left, symbolS *right,
 	}
       if (addr_in_frag_range (hfrag, S_GET_VALUE (right)))
 	offset -= (S_GET_VALUE (right)
-		   - hfrag->fr_address
-		   + hfrag->tc_frag_data.relax_sop);
+		   - hfrag->fr_address);
     }
   else
     {
@@ -11620,7 +11622,6 @@ jump_vector_in_range_p (symbolS *left, symbolS *right,
 	offset = (lfrag->fr_address
 		  + jump_vector_size_frag (lfrag)
 		  - S_GET_VALUE (right));
-      offset += lfrag->tc_frag_data.relax_sop;
       lfrag = lfrag->fr_next;
       while (lfrag && lfrag != hfrag && offset <= max_offset)
 	{
@@ -11629,8 +11630,7 @@ jump_vector_in_range_p (symbolS *left, symbolS *right,
 	}
       if (addr_in_frag_range (hfrag, S_GET_VALUE (left)))
 	offset += (S_GET_VALUE (left)
-		   - hfrag->fr_address
-		   + hfrag->tc_frag_data.relax_sop);
+		   - hfrag->fr_address);
     }
 
   return (offset >= min_offset && offset <= max_offset);
