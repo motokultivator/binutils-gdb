@@ -246,6 +246,9 @@ struct nanomips_set_options
 
   /* Enable/disable resolution of link-invariable PC-relative fix-ups.  */
   bfd_boolean minimize_relocs;
+
+  /* Enable/disable legacy fall-back for minimize_relocs.  */
+  bfd_boolean legacy_minimize_relocs_behavior;
 };
 
 /* Specifies whether module level options have been checked yet.  */
@@ -261,7 +264,8 @@ static struct nanomips_set_options file_nanomips_opts = {
   /* arch */ CPU_UNKNOWN, /* soft_float */ FALSE, /* single_float */ FALSE,
   /* init_ase */ 0, /* no_balc_stubs */ TRUE, /* legacyregs */ FALSE,
   /* pcrel */ FALSE, /* pid */ FALSE, /* pic */ NO_PIC,
-  /* mc_model */ MC_AUTO, /* linkrelax */ FALSE, /* minimize_relocs */ FALSE
+  /* mc_model */ MC_AUTO, /* linkrelax */ FALSE, /* minimize_relocs */ FALSE,
+  /* legacy_minimize_relocs_behavior */ FALSE,
 };
 
 /* This is similar to file_nanomips_opts, but for the current set of options.  */
@@ -272,7 +276,8 @@ static struct nanomips_set_options nanomips_opts = {
   /* arch */ CPU_UNKNOWN, /* soft_float */ FALSE, /* single_float */ FALSE,
   /* init_ase */ 0, /* no_balc_stubs */ TRUE, /* legacyregs */ FALSE,
   /* pcrel */ FALSE, /* pid */ FALSE, /* pic */ NO_PIC,
-  /* mc_model */ MC_AUTO, /* linkrelax */ FALSE, /* minimize_relocs */ FALSE
+  /* mc_model */ MC_AUTO, /* linkrelax */ FALSE, /* minimize_relocs */ FALSE,
+  /* legacy_minimize_relocs_behavior */ FALSE,
 };
 
 /* Which bits of file_ase were explicitly set or cleared by ASE options.  */
@@ -886,6 +891,7 @@ enum options
   OPTION_MINIMIZE_RELOCS,
   OPTION_NO_MINIMIZE_RELOCS,
   OPTION_SET_DCBITS,
+  OPTION_LEGACY_MINIMIZE_RELOCS_BEHAVIOR,
   OPTION_END_OF_ENUM
 };
 
@@ -951,6 +957,7 @@ struct option md_longopts[] = {
   {"mminimize-relocs", no_argument, NULL, OPTION_MINIMIZE_RELOCS},
   {"mno-minimize-relocs", no_argument, NULL, OPTION_NO_MINIMIZE_RELOCS},
   {"mset-dcbits", required_argument, NULL, OPTION_SET_DCBITS},
+  {"mlegacy-minimize-relocs-behavior", no_argument, NULL, OPTION_LEGACY_MINIMIZE_RELOCS_BEHAVIOR},
 
   {NULL, no_argument, NULL, 0}
 };
@@ -5790,7 +5797,9 @@ append_insn (struct nanomips_cl_insn *ip, expressionS *address_expr,
       gas_assert (address_expr != NULL);
       gas_assert (!nanomips_relax.sequence);
 
-      if (!forced_insn_format)
+      if (!forced_insn_format
+	  || (nanomips_opts.legacy_minimize_relocs_behavior
+	      && nanomips_opts.minimize_relocs))
 	add_relaxed_insn (ip, max, insn_length (ip->insn_mo),
 			  RELAX_MD_ENCODE (type, al, rf),
 			  address_expr->X_add_symbol,
@@ -5859,7 +5868,9 @@ append_insn (struct nanomips_cl_insn *ip, expressionS *address_expr,
 	}
 
       if (pcrel_branch_reloc_p (*reloc_type)
-	  && address_expr->X_op != O_constant)
+	  && address_expr->X_op != O_constant
+	  && (!nanomips_opts.legacy_minimize_relocs_behavior
+	      || nanomips_opts.minimize_relocs))
 	{
 	  enum relax_nanomips_fix_type fix_type;
 	  relax_substateT stype;
@@ -9522,6 +9533,11 @@ md_parse_option (int c, const char *arg)
       if (nanomips_dc_bits == LONG_MIN || nanomips_dc_bits == LONG_MAX)
 	as_fatal (_("Could not parse don't care bit-pattern: %s"), arg);
       break;
+
+    case OPTION_LEGACY_MINIMIZE_RELOCS_BEHAVIOR:
+      file_nanomips_opts.legacy_minimize_relocs_behavior = TRUE;
+      break;
+
     default:
       return 0;
     }
@@ -9622,7 +9638,8 @@ nanomips_force_relocation (fixS *fixp)
 {
   if (pcrel_branch_reloc_p (fixp->fx_r_type)
       && RELAX_MD_FIXED (fixp->fx_frag->fr_subtype)
-      && nanomips_opts.minimize_relocs)
+      && (nanomips_opts.legacy_minimize_relocs_behavior
+	  || nanomips_opts.minimize_relocs))
     return 0;
 
   if (generic_force_reloc (fixp))
@@ -9784,7 +9801,8 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
       || (pcrel_branch_reloc_p (fixP->fx_r_type)
 	  && fixP->fx_frag
 	  && RELAX_MD_FIXED (fixP->fx_frag->fr_subtype)
-	  && nanomips_opts.minimize_relocs))
+	  && (nanomips_opts.legacy_minimize_relocs_behavior
+	      || nanomips_opts.minimize_relocs)))
     fixP->fx_done = 1;
 
   switch (fixP->fx_r_type)
@@ -11144,6 +11162,10 @@ mark_if_invariable_branch (fragS *fragp, asection *sec)
 
   gas_assert (fragp != NULL);
 
+  if (nanomips_opts.legacy_minimize_relocs_behavior
+      && !nanomips_opts.minimize_relocs)
+    return;
+
   /* Trivially mark branches to external symbols as unfixable.  */
   if (fragp->fr_symbol
       && (S_IS_EXTERNAL (fragp->fr_symbol)
@@ -11813,7 +11835,8 @@ nanomips_fix_adjustable (fixS *fixp)
   if (pcrel_reloc_p (fixp->fx_r_type))
     return (fixp->fx_addsy == fixp->fx_frag->fr_symbol
 	    && RELAX_MD_FIXED (fixp->fx_frag->fr_subtype)
-	    && nanomips_opts.minimize_relocs);
+	    && (nanomips_opts.legacy_minimize_relocs_behavior
+		|| nanomips_opts.minimize_relocs));
 
   /* Relocations to code sections need to be symbol rather than section
      relative for nanoMIPS, to allow linker expansions and relaxations
@@ -13516,7 +13539,9 @@ nanomips_allow_local_subtract_symbols (symbolS *left, symbolS *right,
       
       return TRUE;
     }
-  else if (S_GET_SEGMENT (left) == S_GET_SEGMENT (right))
+  else if (S_GET_SEGMENT (left) == S_GET_SEGMENT (right)
+	   && (!nanomips_opts.legacy_minimize_relocs_behavior
+	       || nanomips_opts.minimize_relocs))
     {
       fragS *fragp, *ifragp;
       bfd_boolean fixed_final = FALSE;
@@ -13718,7 +13743,8 @@ md_pcrel_from (fixS *fixP)
 
   if (pcrel_branch_reloc_p (fixP->fx_r_type)
       && RELAX_MD_FIXED (fixP->fx_frag->fr_subtype)
-      && nanomips_opts.minimize_relocs)
+      && (nanomips_opts.legacy_minimize_relocs_behavior
+	  || nanomips_opts.minimize_relocs))
     {
       if (pcrel16_reloc_p (fixP->fx_r_type))
 	return addr + 2;

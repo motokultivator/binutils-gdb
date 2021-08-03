@@ -1,5 +1,6 @@
 #objdump: -Wf
 #name: nanoMIPS decoding DWARF frame
+#as: -mno-minimize-relocs -mlegacy-minimize-relocs-behavior
 
 dump.o:     .*nanomips.*
 
@@ -16,20 +17,20 @@ Contents of the .eh_frame section:
   DW_CFA_def_cfa_register: r29
   DW_CFA_nop
 
-00000014 00000048 00000018 FDE cie=00000000 pc=00000000..0000003c
-  DW_CFA_advance_loc: 4 to 00000004
+00000014 00000058 00000018 FDE cie=00000000 pc=00000000..0000003c
+  DW_CFA_advance_loc4: 4 to 00000004
   DW_CFA_def_cfa_offset: 16
   DW_CFA_offset: r30 at cfa-4
   DW_CFA_offset: r31 at cfa-8
-  DW_CFA_advance_loc: 2 to 00000006
+  DW_CFA_advance_loc4: 2 to 00000006
   DW_CFA_def_cfa: r30 ofs 4096
   DW_CFA_advance_loc4: 22 to 0000001c
   DW_CFA_def_cfa: r29 ofs 16
-  DW_CFA_advance_loc: 4 to 00000020
+  DW_CFA_advance_loc4: 4 to 00000020
   DW_CFA_def_cfa_offset: 32
   DW_CFA_offset: r30 at cfa-4
   DW_CFA_offset: r31 at cfa-8
-  DW_CFA_advance_loc: 6 to 00000026
+  DW_CFA_advance_loc4: 6 to 00000026
   DW_CFA_def_cfa: r30 ofs 4096
   DW_CFA_advance_loc4: 8 to 0000002e
   DW_CFA_def_cfa: r29 ofs 16
