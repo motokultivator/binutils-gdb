@@ -13,10 +13,10 @@ test:
 	.cfi_offset 31, -8
 	balc	test
 	.cfi_def_cfa 30, 4096
-	lw	$a3, %gprel(test)($gp)
+	lw	$a3, %gprel(test1)($gp)
 	beqzc	$a3, $L3
 	balc	test
-	addiu[gp.w]	$a1, $gp, %gprel(test)
+	addiu[gp.w]	$a1, $gp, %gprel(test1)
 	move.balc	$a0, $a3, __cxa_throw
 	addiu	$sp, $fp, 4080
 	.cfi_def_cfa 29, 16
@@ -28,13 +28,13 @@ test:
 	balc	test
 	sw	$a0, 4076($fp)
 	.cfi_def_cfa 30, 4096
-	balc	test
+	balc	test1
 	addiu	$sp, $fp, 4080
 	.cfi_def_cfa 29, 16
 	restore.jrc	16, $fp, $ra
-	balc	test
+	balc	test1
 	.cfi_def_cfa 28, 4096
-	balc	test
+	balc	test1
 	addiu	$sp, $fp, 4080
 	.cfi_def_cfa 27, 32
 	.end test

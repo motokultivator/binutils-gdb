@@ -261,7 +261,7 @@ static struct nanomips_set_options file_nanomips_opts = {
   /* arch */ CPU_UNKNOWN, /* soft_float */ FALSE, /* single_float */ FALSE,
   /* init_ase */ 0, /* no_balc_stubs */ TRUE, /* legacyregs */ FALSE,
   /* pcrel */ FALSE, /* pid */ FALSE, /* pic */ NO_PIC,
-  /* mc_model */ MC_AUTO, /* linkrelax */ FALSE, /* minimize_relocs */ TRUE
+  /* mc_model */ MC_AUTO, /* linkrelax */ FALSE, /* minimize_relocs */ FALSE
 };
 
 /* This is similar to file_nanomips_opts, but for the current set of options.  */
@@ -272,7 +272,7 @@ static struct nanomips_set_options nanomips_opts = {
   /* arch */ CPU_UNKNOWN, /* soft_float */ FALSE, /* single_float */ FALSE,
   /* init_ase */ 0, /* no_balc_stubs */ TRUE, /* legacyregs */ FALSE,
   /* pcrel */ FALSE, /* pid */ FALSE, /* pic */ NO_PIC,
-  /* mc_model */ MC_AUTO, /* linkrelax */ FALSE, /* minimize_relocs */ TRUE
+  /* mc_model */ MC_AUTO, /* linkrelax */ FALSE, /* minimize_relocs */ FALSE
 };
 
 /* Which bits of file_ase were explicitly set or cleared by ASE options.  */
@@ -5790,7 +5790,7 @@ append_insn (struct nanomips_cl_insn *ip, expressionS *address_expr,
       gas_assert (address_expr != NULL);
       gas_assert (!nanomips_relax.sequence);
 
-      if (nanomips_opts.minimize_relocs || !forced_insn_format)
+      if (!forced_insn_format)
 	add_relaxed_insn (ip, max, insn_length (ip->insn_mo),
 			  RELAX_MD_ENCODE (type, al, rf),
 			  address_expr->X_add_symbol,
@@ -5858,8 +5858,7 @@ append_insn (struct nanomips_cl_insn *ip, expressionS *address_expr,
 	  nanomips_macro_warning.insns[1]++;
 	}
 
-      if (nanomips_opts.minimize_relocs
-	  && pcrel_branch_reloc_p (*reloc_type)
+      if (pcrel_branch_reloc_p (*reloc_type)
 	  && address_expr->X_op != O_constant)
 	{
 	  enum relax_nanomips_fix_type fix_type;
@@ -9622,7 +9621,8 @@ int
 nanomips_force_relocation (fixS *fixp)
 {
   if (pcrel_branch_reloc_p (fixp->fx_r_type)
-      && RELAX_MD_FIXED (fixp->fx_frag->fr_subtype))
+      && RELAX_MD_FIXED (fixp->fx_frag->fr_subtype)
+      && nanomips_opts.minimize_relocs)
     return 0;
 
   if (generic_force_reloc (fixp))
@@ -9783,7 +9783,8 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
   if ((fixP->fx_addsy == NULL && !fixP->fx_pcrel && fixP->fx_tcbit == 0)
       || (pcrel_branch_reloc_p (fixP->fx_r_type)
 	  && fixP->fx_frag
-	  && RELAX_MD_FIXED (fixP->fx_frag->fr_subtype)))
+	  && RELAX_MD_FIXED (fixP->fx_frag->fr_subtype)
+	  && nanomips_opts.minimize_relocs))
     fixP->fx_done = 1;
 
   switch (fixP->fx_r_type)
@@ -11143,11 +11144,6 @@ mark_if_invariable_branch (fragS *fragp, asection *sec)
 
   gas_assert (fragp != NULL);
 
-  /* Don't bother  */
-  if (!nanomips_opts.minimize_relocs
-      || RELAX_MD_ADDIU_P (fragp->fr_subtype))
-    return;
-
   /* Trivially mark branches to external symbols as unfixable.  */
   if (fragp->fr_symbol
       && (S_IS_EXTERNAL (fragp->fr_symbol)
@@ -11816,7 +11812,8 @@ nanomips_fix_adjustable (fixS *fixp)
      relative to allow linker relaxations to be performed later on.  */
   if (pcrel_reloc_p (fixp->fx_r_type))
     return (fixp->fx_addsy == fixp->fx_frag->fr_symbol
-	    && RELAX_MD_FIXED (fixp->fx_frag->fr_subtype));
+	    && RELAX_MD_FIXED (fixp->fx_frag->fr_subtype)
+	    && nanomips_opts.minimize_relocs);
 
   /* Relocations to code sections need to be symbol rather than section
      relative for nanoMIPS, to allow linker expansions and relaxations
@@ -13519,8 +13516,7 @@ nanomips_allow_local_subtract_symbols (symbolS *left, symbolS *right,
       
       return TRUE;
     }
-  else if (nanomips_opts.minimize_relocs
-	   && S_GET_SEGMENT (left) == S_GET_SEGMENT (right))
+  else if (S_GET_SEGMENT (left) == S_GET_SEGMENT (right))
     {
       fragS *fragp, *ifragp;
       bfd_boolean fixed_final = FALSE;
@@ -13721,7 +13717,8 @@ md_pcrel_from (fixS *fixP)
   valueT addr = fixP->fx_where + fixP->fx_frag->fr_address;
 
   if (pcrel_branch_reloc_p (fixP->fx_r_type)
-      && RELAX_MD_FIXED (fixP->fx_frag->fr_subtype))
+      && RELAX_MD_FIXED (fixP->fx_frag->fr_subtype)
+      && nanomips_opts.minimize_relocs)
     {
       if (pcrel16_reloc_p (fixP->fx_r_type))
 	return addr + 2;

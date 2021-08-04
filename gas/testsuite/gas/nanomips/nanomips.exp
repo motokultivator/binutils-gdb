@@ -793,8 +793,8 @@ if { [istarget nanomips*-*-*] } {
     run_dump_test_arches "u-ldst-pic" [arch_list_matching nanomipsr6]
     run_dump_test_arches "u-ldsd" [arch_list_matching nanomipsr6]
 
-    run_dump_test "dont-care-bits-xf"
-    run_dump_test "dont-care-bits-x5"
+    run_dump_test_arches "dont-care-bits-xf" [arch_list_matching nanomips32r6]
+    run_dump_test_arches "dont-care-bits-x5" [arch_list_matching nanomips32r6]
 
     run_dump_test_arches "relax-jumptable" "" \
 					[arch_list_matching nanomips]

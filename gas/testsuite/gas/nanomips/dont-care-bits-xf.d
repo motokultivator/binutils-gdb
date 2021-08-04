@@ -1,7 +1,7 @@
 #objdump: -dr --show-raw-insn
 #name: Encodings with don't care bits set to all 1s
 #source: dont-care-bits.s
-#as: -mset-dcbits=0xfff
+#as: -mset-dcbits=0xfff -mminimize-relocs
 
 # Check user-specified patterns for don't care bits
 
@@ -13,7 +13,8 @@ Disassembly of section \.text:
    0:	209f 0390 	dvp	a0
    4:	20c5 2510 	add	a0,a1,a2
    8:	4be4 8fff 	balrsc	ra,a0
-   c:	c8a6 c000 	bbeqzc	a1,24,10 <test\+0x10>
+   c:	c8a6 c000 	bbeqzc	a1,24,10 <.*>
+#...
   10:	2085 ebe8 	crc32w	a0,a1
   14:	23ff e37f 	deret
   18:	801f ce03 	ehb
