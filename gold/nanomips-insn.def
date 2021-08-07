@@ -169,8 +169,12 @@
 #define BC16 NIT16("bc[16]", 0x1800, PC10_S1, NULL, NULL)
 // beqc16 $reg, $reg, sym
 #define BEQC16 NIT16("beqc[16]", 0xd800, PC4_S1, INS_REG(7, 3, TREG), INS_REG(4, 3, SREG))
+// beqzc16 $reg, sym
+#define BEQZC16 NIT16("beqzc[16]", 0x9800, PC7_S1, INS_REG(7, 3, TREG), NULL)
 // bnec16 $reg, $reg, sym
 #define BNEC16 NIT16("bnec[16]", 0xd800, PC4_S1, INS_REG(7, 3, TREG), INS_REG(4, 3, SREG))
+// bnezc16 $reg, sym
+#define BNEZC16 NIT16("bnezc[16]", 0xb800, PC7_S1, INS_REG(7, 3, TREG), NULL)
 // lb16 $reg, 0(sym)($reg)
 #define LB16 NIT16("lb[16]", 0x5c00, NONE, INS_REG(7, 3, TREG), INS_REG(4, 3, SREG))
 // lbu16 $reg, 0(sym)($reg)
@@ -257,11 +261,13 @@ NTT(PCREL32_LONG,     RELS(R(PC21_S1)),                               INSNS(MOVE
 // beqc $reg, $reg, sym
 NIP32("beqc",           0x88000000,    EXT_REG(21, 5),       valid_reg,             EXT_REG(16, 5),       valid_reg)
 NTT(PCREL16,          RELS(R(PC14_S1)),                               INSNS(BEQC16))
+NTT(PCREL16_ZERO,     RELS(R(PC14_S1)),                               INSNS(BEQZC16))
 NTT(PCREL32_LONG,     RELS(R(PC14_S1)),                               INSNS(BNEC32(NONE), BC32))
 
 // bnec $reg, $reg, sym
 NIP32("bnec",           0xa8000000,    EXT_REG(21, 5),       valid_reg,             EXT_REG(16, 5),       valid_reg)
 NTT(PCREL16,          RELS(R(PC14_S1)),                               INSNS(BNEC16))
+NTT(PCREL16_ZERO,     RELS(R(PC14_S1)),                               INSNS(BNEZC16))
 NTT(PCREL32_LONG,     RELS(R(PC14_S1)),                               INSNS(BEQC32(NONE), BC32))
 
 // bgec $reg, $reg, sym

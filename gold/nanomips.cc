@@ -4667,7 +4667,7 @@ Nanomips_transformations<size, big_endian>::transform(
   // This cover cases where for bc instruction we need to do expansion.
   if ((r_type == elfcpp::R_NANOMIPS_PC14_S1
        || r_type == elfcpp::R_NANOMIPS_PC11_S1)
-      && (type != TT_PCREL16))
+      && (type != TT_PCREL16 && type != TT_PCREL16_ZERO))
     input_section->add_branch_reloc(r_type, r_offset);
 
   // Discard relocation for TT_DISCARD type.
@@ -4807,13 +4807,17 @@ Nanomips_relax_insn<size, big_endian>::find_insn(
         return insn_property;
     case elfcpp::R_NANOMIPS_PC14_S1:
       {
+        unsigned int sreg = insn_property->sreg(insn);
+
         if (!insn_property->has_transform(TT_PCREL16, r_type)
             || !relobj->nmf()
-            || !insn_property->valid_regs(insn))
+            || (!insn_property->valid_regs(insn)
+                && !(insn_property->has_transform(TT_PCREL16_ZERO, r_type)
+                     && insn_property->valid_treg(insn)
+                     && sreg == 0)))
           return NULL;
 
         unsigned int treg = insn_property->treg(insn);
-        unsigned int sreg = insn_property->sreg(insn);
         const char* name = insn_property->name().c_str();
 
         // We can't relax beqc to beqc[16] instruction if
@@ -5108,9 +5112,14 @@ Nanomips_relax_insn<size, big_endian>::type(
     case elfcpp::R_NANOMIPS_PC14_S1:
       {
         Valtype value = psymval->value(relobj, r_addend) - address - 4;
+        unsigned int sreg = insn_property->sreg(insn);
         if (value != 0
+            && sreg != 0
             && !this->template has_overflow_unsigned<5>(value))
           return TT_PCREL16;
+        else if (sreg == 0
+                 && !this->template has_overflow_signed<8>(value))
+          return TT_PCREL16_ZERO;
         else
           return TT_NONE;
       }

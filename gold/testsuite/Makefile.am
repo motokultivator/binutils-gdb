@@ -4831,6 +4831,22 @@ nanomips_saverestore_relax.o: nanomips_saverestore_relax.s
 
 MOSTLYCLEANFILES += nanomips_saverestore_relax
 
+# Test that the beqzc[32]/bnezc[32] instructions are relaxed to their 16-bit variants.
+
+check_SCRIPTS += nanomips_bxxzc32_relax.sh
+check_DATA += nanomips_bxxzc32_relax.stdout
+
+nanomips_bxxzc32_relax.stdout: nanomips_bxxzc32_relax
+	$(TEST_OBJDUMP) -d -M show-arch-insn $< > $@
+
+nanomips_bxxzc32_relax: nanomips_bxxzc32_relax.o ../ld-new
+	../ld-new nanomips_bxxzc32_relax.o --relax -o $@
+
+nanomips_bxxzc32_relax.o: nanomips_bxxzc32_relax.s
+	$(TEST_AS) -EL -march=32r6 -m32 -o $@ $<
+
+MOSTLYCLEANFILES += nanomips_bxxzc32_relax
+
 endif DEFAULT_TARGET_NANOMIPS
 
 endif NATIVE_OR_CROSS_LINKER
