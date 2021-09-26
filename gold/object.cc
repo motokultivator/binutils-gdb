@@ -1828,7 +1828,7 @@ Sized_relobj_file<size, big_endian>::do_layout(Symbol_table* symtab,
   if (emit_relocs)
     this->size_relocatable_relocs();
 
-  gold_assert(!is_two_pass || reloc_sections.empty());
+  gold_assert(!is_two_pass || !relocatable || reloc_sections.empty());
 
   for (std::vector<unsigned int>::const_iterator p = reloc_sections.begin();
        p != reloc_sections.end();
@@ -1867,6 +1867,13 @@ Sized_relobj_file<size, big_endian>::do_layout(Symbol_table* symtab,
 	  out_section_offsets[i] = invalid_address;
 	  continue;
 	}
+      if (data_section == reinterpret_cast<Output_section*>(1))
+        {
+	  gold_assert(is_pass_one);
+	  out_sections[i] = reinterpret_cast<Output_section*>(1);
+	  out_section_offsets[i] = invalid_address;
+	  continue;
+        }
 
       Relocatable_relocs* rr = new Relocatable_relocs();
       this->set_relocatable_relocs(i, rr);
