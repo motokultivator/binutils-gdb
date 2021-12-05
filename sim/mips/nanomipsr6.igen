@@ -784,9 +784,9 @@
     case FP_R6CMP_LE:
       return "LE";
     case FP_R6CMP_ULE:
-      return "ULE";
     default:
-      abort ();
+      return "ULE";
+//      abort ();
     }
 }
 

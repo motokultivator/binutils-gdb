@@ -507,8 +507,8 @@ TOP_CFLAGS = -I$(top_srcdir)/..
 
 # The simulator is usually nonexistent; targets that include one
 # should set this to list all the .o or .a files to be linked in.
-SIM = @SIM@
-
+#SIM = @SIM@
+SIM = ../sim/mips/libsim.a
 WIN32LIBS = @WIN32LIBS@
 
 # Tcl et al cflags and libraries
