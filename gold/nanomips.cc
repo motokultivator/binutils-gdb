@@ -3567,54 +3567,54 @@ Nanomips_relobj<size, big_endian>::initialize_defined_symbols(
           || !gsym->is_defined())
         continue;
 
-        bool is_ordinary;
-        unsigned int sym_shndx = gsym->shndx(&is_ordinary);
+      bool is_ordinary;
+      unsigned int sym_shndx = gsym->shndx(&is_ordinary);
+	
+      // Skip non-ordinary symbols.
+      if (!is_ordinary)
+	continue;
 
-        // Skip non-ordinary symbols.
-        if (!is_ordinary)
-          continue;
+      // Skip this symbol if it is not defined in a transformable
+      // section.
+      typename Transformable_sections::Iterator it =
+	sections->sections_map.find(sym_shndx);
+      if (it == sections->sections_map.end())
+	continue;
 
-        // Skip this symbol if it is not defined in a transformable
-        // section.
-        typename Transformable_sections::Iterator it =
-          sections->sections_map.find(sym_shndx);
-        if (it == sections->sections_map.end())
-          continue;
+      // Skip this symbol if it is already added to its transformable
+      // section.  This can happen for the '--wrap SYMBOL' option where
+      // object file contains the definition of a __wrap_SYMBOL and
+      // includes a direct call to a SYMBOL.  In this case, both symbols
+      // will reference the same symbol (which is __wrap_SYMBOL) and we
+      // don't want to adjust __wrap_SYMBOL twice.
+      if (added_syms.find(gsym) != added_syms.end())
+	continue;
 
-        // Skip this symbol if it is already added to its transformable
-        // section.  This can happen for the '--wrap SYMBOL' option where
-        // object file contains the definition of a __wrap_SYMBOL and
-        // includes a direct call to a SYMBOL.  In this case, both symbols
-        // will reference the same symbol (which is __wrap_SYMBOL) and we
-        // don't want to adjust __wrap_SYMBOL twice.
-        if (added_syms.find(gsym) != added_syms.end())
-          continue;
+      // Keep track of symbols that are already added.
+      added_syms.insert(gsym);
 
-        // Keep track of symbols that are already added.
-        added_syms.insert(gsym);
+      // Add this symbol to its transformable section.
+      it->second.symbols.push_back(Defined_symbol(gsym));
 
-        // Add this symbol to its transformable section.
-        it->second.symbols.push_back(Defined_symbol(gsym));
+      // Don't adjust this symbol if it is not defined in a section
+      // that are we currently transforming.
+      if (sym_shndx != shndx)
+	continue;
 
-        // Don't adjust this symbol if it is not defined in a section
-        // that are we currently transforming.
-        if (sym_shndx != shndx)
-          continue;
+      Address value = gsym->value();
 
-        Address value = gsym->value();
+      // Adjust value of the symbol, if needed.
+      if (value >= address)
+	gsym->set_value(value + count);
 
-        // Adjust value of the symbol, if needed.
-        if (value >= address)
-          gsym->set_value(value + count);
-
-        // Adjust the function symbol's size, if needed.
-        if (gsym->is_func())
-          {
-            Size_type symsize = gsym->symsize();
-            if (value < address
-                && value + symsize >= address)
-              gsym->set_symsize(symsize + count);
-          }
+      // Adjust the function symbol's size, if needed.
+      if (gsym->is_func())
+	{
+	  Size_type symsize = gsym->symsize();
+	  if (value < address
+	      && value + symsize >= address)
+	    gsym->set_symsize(symsize + count);
+	}
     }
 }
 
