@@ -206,6 +206,7 @@ m68*)		 targ_archs=bfd_m68k_arch ;;
 s12z*)         targ_archs=bfd_s12z_arch ;;
 microblaze*)	 targ_archs=bfd_microblaze_arch ;;
 mips*)		 targ_archs=bfd_mips_arch ;;
+nanomips*)	 targ_archs=bfd_nanomips_arch ;;
 nds32*)		 targ_archs=bfd_nds32_arch ;;
 nfp)		 targ_archs=bfd_nfp_arch ;;
 nios2*)          targ_archs=bfd_nios2_arch ;;
@@ -998,6 +999,11 @@ case "${targ}" in
   msp430-*-*)
     targ_defvec=msp430_elf32_vec
     targ_selvecs=msp430_elf32_ti_vec
+    ;;
+
+  nanomips*-*-elf*)
+    targ_defvec=nanomips_elf32_le_vec
+    targ_selvecs="nanomips_elf32_be_vec nanomips_elf64_be_vec nanomips_elf64_le_vec"
     ;;
 
   nds32*le-*-linux*)
