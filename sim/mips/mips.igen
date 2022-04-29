@@ -79,6 +79,9 @@
 :model:::micromips32:micromips64:	// micromips.igen
 :model:::micromips64:micromips64:	// micromips.igen
 :model:::micromipsdsp:micromipsdsp:	// micromipsdsp.igen
+:model:::nanomips32r6:nanomips32r6: // nanomipsr6.igen
+:model:::nanomips64r6:nanomips64r6: // nanomipsr6.igen
+:model:::nanomipsdsp:nanomipsdsp: // nanompsdsp.igen
 
 //  Vendor Extensions
 //
@@ -98,6 +101,31 @@
 // For grep - RSVD_INSTRUCTION, RSVD_INSTRUCTION_MASK
 000000,5.*,5.*,5.*,5.OP,111001:SPECIAL:32::RSVD
 "rsvd <OP>"
+*mipsI:
+*mipsII:
+*mipsIII:
+*mipsIV:
+*mipsV:
+*mips32:
+*mips32r2:
+*mips64:
+*mips64r2:
+*vr4100:
+*vr4120:
+*vr5000:
+*vr5400:
+*vr5500:
+*r3900:
+*mips16:
+*mips16e:
+*mips3d:
+*mdmx:
+*dsp:
+*dsp2:
+*smartmips:
+*micromips32:
+*micromips64:
+*micromipsdsp:
 {
   SignalException (ReservedInstruction, instruction_0);
 }
@@ -192,6 +220,7 @@
 *vr5000:
 *r3900:
 *micromips32:
+*nanomips32r6:
 {
   return base + offset;
 }
@@ -201,6 +230,7 @@
 *mips64r2:
 *micromips64:
 *mips64r6:
+*nanomips64r6:
 {
 #if 0 /* XXX FIXME: enable this only after some additional testing.  */
   /* If in user mode and UX is not set, use 32-bit compatibility effective
@@ -237,6 +267,8 @@
 *micromips32:
 *micromips64:
 *mips64r6:
+*nanomips32r6:
+*nanomips64r6:
 {
 #if WITH_TARGET_WORD_BITSIZE == 64
   return value != (((value & 0xffffffff) ^ 0x80000000) - 0x80000000);
@@ -274,6 +306,8 @@
 *micromips32:
 *micromips64:
 *mips64r6:
+*nanomips32r6:
+*nanomips64r6:
 {
   unpredictable_action (CPU, CIA);
 }
@@ -369,6 +403,7 @@
 *r3900:
 *micromips32:
 *micromips64:
+*nanomipsdsp:
 {
   int64_t time = sim_events_time (SD);
   history->mt.timestamp = time;
@@ -399,6 +434,7 @@
 *r3900:
 *micromips32:
 *micromips64:
+*nanomipsdsp:
 {
   int64_t time = sim_events_time (SD);
   int ok = 1;
@@ -473,6 +509,7 @@
 *r3900:
 *micromips32:
 *micromips64:
+*nanomipsdsp:
 {
   /* FIXME: could record the fact that a stall occured if we want */
   int64_t time = sim_events_time (SD);
@@ -570,6 +607,8 @@
 *micromips64:
 *micromips32:
 *mips64r6:
+*nanomips32r6:
+*nanomips64r6:
 {
 #if 0 /* XXX FIXME: enable this only after some additional testing.  */
   if (UserMode && (SR & (status_UX|status_PX)) == 0)
@@ -781,12 +820,44 @@
 }
 
 :function:::void:do_lb:int rt, int offset, int base
+*mipsI:
+*mipsII:
+*mipsIII:
+*mipsIV:
+*mipsV:
+*mips32:
+*mips32r2:
+*mips32r6:
+*mips64:
+*mips64r2:
+*mips64r6:
+*vr4100:
+*vr5000:
+*r3900:
+*micromips32:
+*micromips64:
 {
   GPR[rt] = EXTEND8 (do_load (SD_, AccessLength_BYTE, GPR[base],
 			      EXTEND16 (offset)));
 }
 
 :function:::void:do_lh:int rt, int offset, int base
+*mipsI:
+*mipsII:
+*mipsIII:
+*mipsIV:
+*mipsV:
+*mips32:
+*mips32r2:
+*mips32r6:
+*mips64:
+*mips64r2:
+*mips64r6:
+*vr4100:
+*vr5000:
+*r3900:
+*micromips32:
+*micromips64:
 {
   GPR[rt] = EXTEND16 (do_load (SD_, AccessLength_HALFWORD, GPR[base],
 			       EXTEND16 (offset)));
@@ -811,6 +882,22 @@
 }
 
 :function:::void:do_lw:int rt, int offset, int base
+*mipsI:
+*mipsII:
+*mipsIII:
+*mipsIV:
+*mipsV:
+*mips32:
+*mips32r2:
+*mips32r6:
+*mips64:
+*mips64r2:
+*mips64r6:
+*vr4100:
+*vr5000:
+*r3900:
+*micromips32:
+*micromips64:
 {
   GPR[rt] = EXTEND32 (do_load (SD_, AccessLength_WORD, GPR[base],
 			       EXTEND16 (offset)));
@@ -823,6 +910,22 @@
 }
 
 :function:::void:do_lhu:int rt, int offset, int base
+*mipsI:
+*mipsII:
+*mipsIII:
+*mipsIV:
+*mipsV:
+*mips32:
+*mips32r2:
+*mips32r6:
+*mips64:
+*mips64r2:
+*mips64r6:
+*vr4100:
+*vr5000:
+*r3900:
+*micromips32:
+*micromips64:
 {
   GPR[rt] = do_load (SD_, AccessLength_HALFWORD, GPR[base], EXTEND16 (offset));
 }
@@ -844,7 +947,8 @@
   address_word offset = EXTEND16 (insn_offset);
     {
       address_word vaddr = loadstore_ea (SD_, base, offset);
-      address_word paddr = vaddr;
+      address_word paddr;
+      int uncached;
       if ((vaddr & 3) != 0)
 	{
 	  SIM_CORE_SIGNAL (SD, CPU, cia, read_map, 4, vaddr, read_transfer,
@@ -852,19 +956,23 @@
 	}
       else
 	{
-	  uint64_t memval = 0;
-	  uint64_t memval1 = 0;
-	  uint64_t mask = (WITH_TARGET_WORD_BITSIZE == 64 ? 0x7 : 0x3);
-	  unsigned int shift = 2;
-	  unsigned int reverse = (ReverseEndian ? (mask >> shift) : 0);
-	  unsigned int bigend = (BigEndianCPU ? (mask >> shift) : 0);
-	  unsigned int byte;
-	  paddr = ((paddr & ~mask) | ((paddr & mask) ^ (reverse << shift)));
-	  LoadMemory (&memval, &memval1, AccessLength_WORD, paddr, vaddr,
-		      isDATA, isREAL);
-	  byte = ((vaddr & mask) ^ (bigend << shift));
-	  GPR[rt] = EXTEND32 (memval >> (8 * byte));
-	  LLBIT = 1;
+	  if (AddressTranslation (vaddr, isDATA, isLOAD, &paddr, &uncached,
+				  isTARGET, isREAL))
+	    {
+	      uint64_t memval = 0;
+	      uint64_t memval1 = 0;
+	      uint64_t mask = (WITH_TARGET_WORD_BITSIZE == 64 ? 0x7 : 0x3);
+	      unsigned int shift = 2;
+	      unsigned int reverse = (ReverseEndian ? (mask >> shift) : 0);
+	      unsigned int bigend = (BigEndianCPU ? (mask >> shift) : 0);
+	      unsigned int byte;
+	      paddr = ((paddr & ~mask) | ((paddr & mask) ^ (reverse << shift)));
+	      LoadMemory (&memval, &memval1, uncached, AccessLength_WORD, paddr,
+			 vaddr, isDATA, isREAL);
+	      byte = ((vaddr & mask) ^ (bigend << shift));
+	      GPR[rt] = EXTEND32 (memval >> (8 * byte));
+	      LLBIT = 1;
+	    }
 	}
     }
 }
@@ -875,8 +983,8 @@
   address_word offset = EXTEND16 (roffset);
   {
     address_word vaddr = loadstore_ea (SD_, base, offset);
-    address_word paddr = vaddr;
-
+    address_word paddr;
+    int uncached;
     if ((vaddr & 7) != 0)
       {
 	SIM_CORE_SIGNAL (SD, CPU, cia, read_map, 8, vaddr, read_transfer,
@@ -884,12 +992,16 @@
       }
     else
       {
-	uint64_t memval = 0;
-	uint64_t memval1 = 0;
-	LoadMemory (&memval, &memval1, AccessLength_DOUBLEWORD, paddr, vaddr,
-		    isDATA, isREAL);
-	GPR[rt] = memval;
-	LLBIT = 1;
+        if (AddressTranslation (vaddr, isDATA, isLOAD, &paddr, &uncached,
+                                isTARGET, isREAL))
+          {
+            uint64_t memval = 0;
+            uint64_t memval1 = 0;
+            LoadMemory (&memval, &memval1, uncached, AccessLength_DOUBLEWORD,
+                        paddr, vaddr, isDATA, isREAL);
+            GPR[rt] = memval;
+            LLBIT = 1;
+          }
       }
   }
 }
@@ -1137,8 +1249,13 @@
   address_word offset = EXTEND16 (insn_offset);
   {
     address_word vaddr = loadstore_ea (SD_, base, offset);
-    address_word paddr = vaddr;
-    /* Prefetch (paddr, vaddr, isDATA, hint); */
+    address_word paddr;
+    int uncached;
+    {
+      if (AddressTranslation (vaddr, isDATA, isLOAD, &paddr, &uncached,
+			      isTARGET, isREAL))
+	Prefetch (uncached, paddr, vaddr, isDATA, hint);
+    }
   }
 }
 
@@ -1149,8 +1266,8 @@
   address_word offset = EXTEND16 (offsetarg);
   {
     address_word vaddr = loadstore_ea (SD_, base, offset);
-    address_word paddr = vaddr;
-
+    address_word paddr;
+    int uncached;
     if ((vaddr & 3) != 0)
       {
 	SIM_CORE_SIGNAL (SD, CPU, cia, read_map, 4, vaddr, write_transfer,
@@ -1158,23 +1275,27 @@
       }
     else
       {
-	uint64_t memval = 0;
-	uint64_t memval1 = 0;
-	uint64_t mask = (WITH_TARGET_WORD_BITSIZE == 64 ? 0x7 : 0x3);
-	address_word reverseendian =
-	  (ReverseEndian ? (mask ^ AccessLength_WORD) : 0);
-	address_word bigendiancpu =
-	  (BigEndianCPU ? (mask ^ AccessLength_WORD) : 0);
-	unsigned int byte;
-	paddr = ((paddr & ~mask) | ((paddr & mask) ^ reverseendian));
-	byte = ((vaddr & mask) ^ bigendiancpu);
-	memval = ((uint64_t) GPR[rt] << (8 * byte));
-	if (LLBIT)
-	  StoreMemory (AccessLength_WORD, memval, memval1, paddr, vaddr,
-		        isREAL);
-	if (store_ll_bit)
-	  GPR[rt] = LLBIT;
-      }
+  if (AddressTranslation (vaddr, isDATA, isSTORE, &paddr, &uncached,
+              isTARGET, isREAL))
+    {
+    uint64_t memval = 0;
+    uint64_t memval1 = 0;
+    uint64_t mask = (WITH_TARGET_WORD_BITSIZE == 64 ? 0x7 : 0x3);
+    address_word reverseendian =
+      (ReverseEndian ? (mask ^ AccessLength_WORD) : 0);
+    address_word bigendiancpu =
+      (BigEndianCPU ? (mask ^ AccessLength_WORD) : 0);
+    unsigned int byte;
+    paddr = ((paddr & ~mask) | ((paddr & mask) ^ reverseendian));
+    byte = ((vaddr & mask) ^ bigendiancpu);
+    memval = ((uint64_t) GPR[rt] << (8 * byte));
+    if (LLBIT)
+        StoreMemory (uncached, AccessLength_WORD, memval, memval1, paddr, vaddr,
+                     isREAL);
+    if (store_ll_bit)
+      GPR[rt] = LLBIT;
+    }
+  }
   }
 }
 
@@ -1184,8 +1305,8 @@
   address_word offset = EXTEND16 (roffset);
   {
     address_word vaddr = loadstore_ea (SD_, base, offset);
-    address_word paddr = vaddr;
-
+    address_word paddr;
+    int uncached;
     if ((vaddr & 7) != 0)
       {
 	SIM_CORE_SIGNAL (SD, CPU, cia, read_map, 8, vaddr, write_transfer,
@@ -1193,15 +1314,19 @@
       }
     else
       {
+        if (AddressTranslation (vaddr, isDATA, isSTORE, &paddr, &uncached,
+                    isTARGET, isREAL))
+          {
 	uint64_t memval = 0;
 	uint64_t memval1 = 0;
 	memval = GPR[rt];
 	if (LLBIT)
-	  StoreMemory (AccessLength_DOUBLEWORD, memval, memval1, paddr, vaddr,
+	  StoreMemory (uncached, AccessLength_DOUBLEWORD, memval, memval1, paddr, vaddr,
 		       isREAL);
 	if (store_ll_bit)
 	  GPR[rt] = LLBIT;
       }
+    }
   }
 }
 
@@ -1688,8 +1813,11 @@
   address_word index = GPR[rindex];
   {
     address_word vaddr = loadstore_ea (SD_, base, index);
-    address_word paddr = vaddr;
-    /* Prefetch (paddr, vaddr, isDATA, hint); */
+    address_word paddr;
+    int uncached;
+    if (AddressTranslation (vaddr, isDATA, isLOAD, &paddr, &uncached, isTARGET,
+			    isREAL))
+      Prefetch (uncached, paddr, vaddr, isDATA, hint);
   }
 }
 
@@ -1753,8 +1881,8 @@
   check_fpu (SD_);
   {
     address_word vaddr = loadstore_ea (SD_, base, offset);
-    address_word paddr = vaddr;
-
+    address_word paddr;
+    int uncached;
     if ((vaddr & 3) != 0)
       {
 	SIM_CORE_SIGNAL (SD, CPU, cia, read_map, AccessLength_WORD+1, vaddr,
@@ -1762,18 +1890,23 @@
       }
     else
       {
-	uword64 memval = 0;
-	uword64 memval1 = 0;
-	uword64 mask = (WITH_TARGET_WORD_BITSIZE == 64 ? 0x7 : 0x3);
-	address_word reverseendian =
-	  (ReverseEndian ? (mask ^ AccessLength_WORD) : 0);
-	address_word bigendiancpu =
-	  (BigEndianCPU ? (mask ^ AccessLength_WORD) : 0);
-	unsigned int byte;
-	paddr = ((paddr & ~mask) | ((paddr & mask) ^ reverseendian));
-	byte = ((vaddr & mask) ^ bigendiancpu);
-	memval = (((uword64)COP_SW(1, ft)) << (8 * byte));
-	StoreMemory (AccessLength_WORD, memval, memval1, paddr, vaddr, isREAL);
+	if (AddressTranslation (vaddr, isDATA, isSTORE, &paddr, &uncached,
+			        isTARGET, isREAL))
+	  {
+	    uword64 memval = 0;
+	    uword64 memval1 = 0;
+	    uword64 mask = (WITH_TARGET_WORD_BITSIZE == 64 ? 0x7 : 0x3);
+	    address_word reverseendian =
+	      (ReverseEndian ?(mask ^ AccessLength_WORD): 0);
+	    address_word bigendiancpu =
+	      (BigEndianCPU ?(mask ^ AccessLength_WORD): 0);
+	    unsigned int byte;
+	    paddr = ((paddr & ~mask) | ((paddr & mask) ^ reverseendian));
+	    byte = ((vaddr & mask) ^ bigendiancpu);
+	    memval = (((uword64)COP_SW(1, ft)) << (8 * byte));
+	    StoreMemory (uncached, AccessLength_WORD, memval, memval1, paddr,
+			 vaddr, isREAL);
+	  }
       }
   }
 }
@@ -1786,8 +1919,8 @@
   check_u64 (SD_, instruction_0);
     {
       address_word vaddr = loadstore_ea (SD_, base, index);
-      address_word paddr = vaddr;
-
+      address_word paddr;
+      int uncached;
       if ((vaddr & 3) != 0)
 	{
 	  SIM_CORE_SIGNAL (SD, CPU, cia, read_map, 4, vaddr, write_transfer,
@@ -1795,19 +1928,23 @@
 	}
       else
 	{
-	  uint64_t memval = 0;
-	  uint64_t memval1 = 0;
-	  uint64_t mask = (WITH_TARGET_WORD_BITSIZE == 64 ? 0x7 : 0x3);
-	  address_word reverseendian =
-	    (ReverseEndian ? (mask ^ AccessLength_WORD) : 0);
-	  address_word bigendiancpu =
-	    (BigEndianCPU ? (mask ^ AccessLength_WORD) : 0);
-	  unsigned int byte;
-	  paddr = ((paddr & ~mask) | ((paddr & mask) ^ reverseendian));
-	  byte = ((vaddr & mask) ^ bigendiancpu);
-	  memval = (((uint64_t)COP_SW(1,fs)) << (8 * byte));
-	  StoreMemory (AccessLength_WORD, memval, memval1, paddr, vaddr,
-		       isREAL);
+	  if (AddressTranslation (vaddr, isDATA, isSTORE, &paddr, &uncached,
+				 isTARGET, isREAL))
+	    {
+	      uint64_t memval = 0;
+	      uint64_t memval1 = 0;
+	      uint64_t mask = (WITH_TARGET_WORD_BITSIZE == 64 ? 0x7 : 0x3);
+	      address_word reverseendian =
+		(ReverseEndian ? (mask ^ AccessLength_WORD) : 0);
+	      address_word bigendiancpu =
+		(BigEndianCPU ? (mask ^ AccessLength_WORD) : 0);
+	      unsigned int byte;
+	      paddr = ((paddr & ~mask) | ((paddr & mask) ^ reverseendian));
+	      byte = ((vaddr & mask) ^ bigendiancpu);
+	      memval = (((uint64_t)COP_SW(1,fs)) << (8 * byte));
+	      StoreMemory (uncached, AccessLength_WORD, memval, memval1, paddr,
+			   vaddr, isREAL);
+	    }
 	}
   }
 }
@@ -1861,7 +1998,23 @@
 
 
 
-:function:::void:do_addiu:int rs, int rt, uint16_t immediate
+:function:::void:do_addiu:int rs, int rt, int immediate
+*mipsI:
+*mipsII:
+*mipsIII:
+*mipsIV:
+*mipsV:
+*mips32:
+*mips32r2:
+*mips32r6:
+*mips64:
+*mips64r2:
+*mips64r6:
+*vr4100:
+*vr5000:
+*r3900:
+*micromips32:
+*micromips64:
 {
   if (NotWordValue (GPR[rs]))
     Unpredictable ();
@@ -2595,6 +2748,14 @@
 
 
 :function:::void:do_ddiv:int rs, int rt
+*mipsIII:
+*mipsIV:
+*mipsV:
+*mips64:
+*mips64r2:
+*micromips64:
+*vr4100:
+*vr5000:
 {
   check_div_hilo (SD_, HIHISTORY, LOHISTORY);
   TRACE_ALU_INPUT2 (GPR[rs], GPR[rt]);
@@ -2641,6 +2802,14 @@
 
 
 :function:::void:do_ddivu:int rs, int rt
+*mipsIII:
+*mipsIV:
+*mipsV:
+*mips64:
+*mips64r2:
+*micromips64:
+*vr4100:
+*vr5000:
 {
   check_div_hilo (SD_, HIHISTORY, LOHISTORY);
   TRACE_ALU_INPUT2 (GPR[rs], GPR[rt]);
@@ -2680,6 +2849,20 @@
 }
 
 :function:::void:do_div:int rs, int rt
+*mipsI:
+*mipsII:
+*mipsIII:
+*mipsIV:
+*mipsV:
+*mips32:
+*mips32r2:
+*micromips32:
+*mips64:
+*mips64r2:
+*micromips64:
+*vr4100:
+*vr5000:
+*r3900:
 {
   check_div_hilo (SD_, HIHISTORY, LOHISTORY);
   TRACE_ALU_INPUT2 (GPR[rs], GPR[rt]);
@@ -2726,6 +2909,20 @@
 
 
 :function:::void:do_divu:int rs, int rt
+*mipsI:
+*mipsII:
+*mipsIII:
+*mipsIV:
+*mipsV:
+*mips32:
+*mips32r2:
+*micromips32:
+*mips64:
+*mips64r2:
+*micromips64:
+*vr4100:
+*vr5000:
+*r3900:
 {
   check_div_hilo (SD_, HIHISTORY, LOHISTORY);
   TRACE_ALU_INPUT2 (GPR[rs], GPR[rt]);
@@ -3277,16 +3474,18 @@
   address_word bigendiancpu = (BigEndianCPU ? (mask ^ access) : 0);
   unsigned int byte;
   address_word paddr;
+  int uncached;
   uint64_t memval;
   address_word vaddr;
 
-  paddr = vaddr = loadstore_ea (SD_, base, offset);
+  vaddr = loadstore_ea (SD_, base, offset);
   if ((vaddr & access) != 0)
     {
       SIM_CORE_SIGNAL (SD, STATE_CPU (SD, 0), cia, read_map, access+1, vaddr, read_transfer, sim_core_unaligned_signal);
     }
+  AddressTranslation (vaddr, isDATA, isLOAD, &paddr, &uncached, isTARGET, isREAL);
   paddr = ((paddr & ~mask) | ((paddr & mask) ^ reverseendian));
-  LoadMemory (&memval, NULL, access, paddr, vaddr, isDATA, isREAL);
+  LoadMemory (&memval, NULL, uncached, access, paddr, vaddr, isDATA, isREAL);
   byte = ((vaddr & mask) ^ bigendiancpu);
   return (memval >> (8 * byte));
 }
@@ -3299,6 +3498,7 @@
   unsigned int byte;
   unsigned int word;
   address_word paddr;
+  int uncached;
   uint64_t memval;
   address_word vaddr;
   int nr_lhs_bits;
@@ -3306,7 +3506,8 @@
   unsigned_word lhs_mask;
   unsigned_word temp;
 
-  paddr = vaddr = loadstore_ea (SD_, base, offset);
+  vaddr = loadstore_ea (SD_, base, offset);
+  AddressTranslation (vaddr, isDATA, isLOAD, &paddr, &uncached, isTARGET, isREAL);
   paddr = (paddr ^ (reverseendian & mask));
   if (BigEndianMem == 0)
     paddr = paddr & ~access;
@@ -3323,7 +3524,7 @@
 	   (long) ((uint64_t) paddr >> 32), (long) paddr,
 	   word, byte, nr_lhs_bits, nr_rhs_bits); */
 
-  LoadMemory (&memval, NULL, byte, paddr, vaddr, isDATA, isREAL);
+  LoadMemory (&memval, NULL, uncached, byte, paddr, vaddr, isDATA, isREAL);
   if (word == 0)
     {
       /* GPR{31..32-NR_LHS_BITS} = memval{NR_LHS_BITS-1..0} */
@@ -3352,17 +3553,19 @@
   address_word bigendiancpu = (BigEndianCPU ? -1 : 0);
   unsigned int byte;
   address_word paddr;
+  int uncached;
   uint64_t memval;
   address_word vaddr;
 
-  paddr = vaddr = loadstore_ea (SD_, base, offset);
+  vaddr = loadstore_ea (SD_, base, offset);
+  AddressTranslation (vaddr, isDATA, isLOAD, &paddr, &uncached, isTARGET, isREAL);
   /* NOTE: SPEC is wrong, has `BigEndianMem == 0' not `BigEndianMem != 0' */
   paddr = (paddr ^ (reverseendian & mask));
   if (BigEndianMem != 0)
     paddr = paddr & ~access;
   byte = ((vaddr & mask) ^ (bigendiancpu & mask));
   /* NOTE: SPEC is wrong, had `byte' not `access - byte'.  See SW. */
-  LoadMemory (&memval, NULL, access - (access & byte), paddr, vaddr, isDATA, isREAL);
+  LoadMemory (&memval, NULL, uncached, access - (access & byte), paddr, vaddr, isDATA, isREAL);
   /* printf ("lr: 0x%08lx %d@0x%08lx 0x%08lx\n",
      (long) paddr, byte, (long) paddr, (long) memval); */
   {
@@ -3714,6 +3917,23 @@
 
 
 :function:::void:do_mfhi:int rd
+*mipsI:
+*mipsII:
+*mipsIII:
+*mipsIV:
+*mipsV:
+*vr4100:
+*vr5000:
+*r3900:
+*mips32:
+*mips64:
+*mips32r2:
+*mips64r2:
+*dsp:
+*micromips32:
+*micromips64:
+*micromipsdsp:
+*nanomipsdsp:
 {
   check_mf_hilo (SD_, HIHISTORY, LOHISTORY);
   TRACE_ALU_INPUT1 (HI);
@@ -4175,18 +4395,20 @@
   address_word bigendiancpu = (BigEndianCPU ? (mask ^ access) : 0);
   unsigned int byte;
   address_word paddr;
+  int uncached;
   uint64_t memval;
   address_word vaddr;
 
-  paddr = vaddr = loadstore_ea (SD_, base, offset);
+  vaddr = loadstore_ea (SD_, base, offset);
   if ((vaddr & access) != 0)
     {
       SIM_CORE_SIGNAL (SD, STATE_CPU(SD, 0), cia, read_map, access+1, vaddr, write_transfer, sim_core_unaligned_signal);
     }
+  AddressTranslation (vaddr, isDATA, isSTORE, &paddr, &uncached, isTARGET, isREAL);
   paddr = ((paddr & ~mask) | ((paddr & mask) ^ reverseendian));
   byte = ((vaddr & mask) ^ bigendiancpu);
   memval = (word << (8 * byte));
-  StoreMemory (access, memval, 0, paddr, vaddr, isREAL);
+  StoreMemory (uncached, access, memval, 0, paddr, vaddr, isREAL);
 }
 
 :function:::void:do_store_left:unsigned access, address_word base, address_word offset, unsigned_word rt
@@ -4197,12 +4419,14 @@
   unsigned int byte;
   unsigned int word;
   address_word paddr;
+  int uncached;
   uint64_t memval;
   address_word vaddr;
   int nr_lhs_bits;
   int nr_rhs_bits;
 
-  paddr = vaddr = loadstore_ea (SD_, base, offset);
+  vaddr = loadstore_ea (SD_, base, offset);
+  AddressTranslation (vaddr, isDATA, isSTORE, &paddr, &uncached, isTARGET, isREAL);
   paddr = (paddr ^ (reverseendian & mask));
   if (BigEndianMem == 0)
     paddr = paddr & ~access;
@@ -4229,7 +4453,7 @@
   /* fprintf (stderr, "s[wd]l: 0x%08lx%08lx -> 0x%08lx%08lx\n",
 	   (long) ((uint64_t) rt >> 32), (long) rt,
 	   (long) ((uint64_t) memval >> 32), (long) memval); */
-  StoreMemory (byte, memval, 0, paddr, vaddr, isREAL);
+  StoreMemory (uncached, byte, memval, 0, paddr, vaddr, isREAL);
 }
 
 :function:::void:do_store_right:unsigned access, address_word base, address_word offset, unsigned_word rt
@@ -4239,16 +4463,18 @@
   address_word bigendiancpu = (BigEndianCPU ? -1 : 0);
   unsigned int byte;
   address_word paddr;
+  int uncached;
   uint64_t memval;
   address_word vaddr;
 
-  paddr = vaddr = loadstore_ea (SD_, base, offset);
+  vaddr = loadstore_ea (SD_, base, offset);
+  AddressTranslation (vaddr, isDATA, isSTORE, &paddr, &uncached, isTARGET, isREAL);
   paddr = (paddr ^ (reverseendian & mask));
   if (BigEndianMem != 0)
     paddr &= ~access;
   byte = ((vaddr & mask) ^ (bigendiancpu & mask));
   memval = (rt << (byte * 8));
-  StoreMemory (access - (access & byte), memval, 0, paddr, vaddr, isREAL);
+  StoreMemory (uncached, access - (access & byte), memval, 0, paddr, vaddr, isREAL);
 }
 
 
@@ -5225,6 +5451,8 @@
 *vr4100:
 *vr5000:
 *r3900:
+*nanomips32r6:
+*nanomips64r6:
 {
   /* None of these ISAs support Paired Single, so just fall back to
      the single/double check.  */
@@ -5273,6 +5501,8 @@
 *r3900:
 *micromips32:
 *micromips64:
+*nanomips32r6:
+*nanomips64r6:
 {
   if (! COP_Usable (1))
     SignalExceptionCoProcessorUnusable (1);
@@ -5316,20 +5546,24 @@
   int bigendian = (BigEndianCPU ? ! ReverseEndian : ReverseEndian);
   address_word vaddr;
   address_word paddr;
+  int uncached;
   uint64_t memval;
   uint64_t v;
 
-  paddr = vaddr = loadstore_ea (SD_, base, offset);
+  vaddr = loadstore_ea (SD_, base, offset);
   if ((vaddr & AccessLength_DOUBLEWORD) != 0)
     {
       SIM_CORE_SIGNAL (SD, STATE_CPU (SD, 0), cia, read_map,
 		       AccessLength_DOUBLEWORD + 1, vaddr, read_transfer,
 		       sim_core_unaligned_signal);
     }
-  LoadMemory (&memval, NULL, AccessLength_WORD, paddr, vaddr, isDATA, isREAL);
+  AddressTranslation (vaddr, isDATA, isLOAD, &paddr, &uncached, isTARGET,
+		      isREAL);
+  LoadMemory (&memval, NULL, uncached, AccessLength_WORD, paddr, vaddr,
+	      isDATA, isREAL);
   v = (uint64_t)memval;
-  LoadMemory (&memval, NULL, AccessLength_WORD, paddr + 4, vaddr + 4, isDATA,
-	      isREAL);
+  LoadMemory (&memval, NULL, uncached, AccessLength_WORD, paddr + 4, vaddr + 4,
+	      isDATA, isREAL);
   return (bigendian ? ((v << 32) | memval) : (v | (memval << 32)));
 }
 
@@ -5351,19 +5585,24 @@
   int bigendian = (BigEndianCPU ? ! ReverseEndian : ReverseEndian);
   address_word vaddr;
   address_word paddr;
+  int uncached;
   uint64_t memval;
 
-  paddr = vaddr = loadstore_ea (SD_, base, offset);
+  vaddr = loadstore_ea (SD_, base, offset);
   if ((vaddr & AccessLength_DOUBLEWORD) != 0)
     {
       SIM_CORE_SIGNAL (SD, STATE_CPU(SD, 0), cia, read_map,
 		       AccessLength_DOUBLEWORD + 1, vaddr, write_transfer,
 		       sim_core_unaligned_signal);
     }
+  AddressTranslation (vaddr, isDATA, isSTORE, &paddr, &uncached, isTARGET,
+		      isREAL);
   memval = (bigendian ? (v >> 32) : (v & 0xFFFFFFFF));
-  StoreMemory (AccessLength_WORD, memval, 0, paddr, vaddr, isREAL);
+  StoreMemory (uncached, AccessLength_WORD, memval, 0, paddr, vaddr,
+	       isREAL);
   memval = (bigendian ? (v & 0xFFFFFFFF) : (v >> 32));
-  StoreMemory (AccessLength_WORD, memval, 0, paddr + 4, vaddr + 4, isREAL);
+  StoreMemory (uncached, AccessLength_WORD, memval, 0, paddr + 4, vaddr + 4,
+	       isREAL);
 }
 
 
@@ -6628,7 +6867,10 @@
   {
     address_word vaddr = loadstore_ea (SD_, base, offset);
     address_word paddr = vaddr;
-    CacheOp(op, vaddr, paddr, instruction_0);
+
+    int uncached;
+    if (AddressTranslation(vaddr,isDATA,isLOAD,&paddr,&uncached,isTARGET,isREAL))
+      CacheOp(op, vaddr, paddr, instruction_0);
   }
 }
 
@@ -6867,4 +7109,5 @@
 :include:::smartmips.igen
 :include:::micromips.igen
 :include:::micromipsdsp.igen
-
+:include:::nanomipsr6.igen
+:include:::nanomipsdsp.igen

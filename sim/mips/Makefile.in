@@ -61,6 +61,7 @@ SIM_OBJS = \
 	cp1.o \
 	mdmx.o \
 	dsp.o \
+	nms.o \
 	sim-main.o \
 	sim-resume.o \
 
@@ -99,6 +100,8 @@ IGEN_INCLUDE=\
 	$(srcdir)/dsp2.igen \
 	$(srcdir)/mips3264r2.igen \
 	$(srcdir)/mips3264r6.igen \
+	$(srcdir)/nanomipsdsp.igen \
+	$(srcdir)/nanomipsr6.igen
 
 # NB:	Since these can be built by a number of generators, care
 #	must be taken to ensure that they are only dependant on
@@ -463,7 +466,10 @@ tmp-mach-multi: $(IGEN_INSN) $(IGEN_DC) $(IGEN) $(IGEN_INCLUDE)
 	  f=`echo $${t} | sed -e 's/.*://'` ; \
 	  case $${p} in \
 	    micromips16*) e="-B 16 -H 15 -o $(MICROMIPS16_DC) -F 16" ;; \
+	    nanomips16*) e="-B 16 -H 15 -o $(MICROMIPS16_DC) -F 16" ;; \
 	    micromips32* | micromips64*) \
+		e="-B 32 -H 31 -o $(MICROMIPS32_DC) -F $${f}" ;; \
+	    nanomips32* | nanomips64*) \
 		e="-B 32 -H 31 -o $(MICROMIPS32_DC) -F $${f}" ;; \
 	    micromips_m32*) \
 		e="-B 32 -H 31 -o $(IGEN_DC) -F $${f}"; \
@@ -578,6 +584,28 @@ tmp-run-multi: $(srcdir)/m16run.c $(srcdir)/micromipsrun.c
 		    -e "s/m32_/m64$${m}_/" ; \
 	      $(SHELL) $(srcdir)/../../move-if-change tmp-run \
 						      micromips$${m}_run.c ; \
+             ;;\
+	    nanomips32*) \
+	      m=`echo $${t} | sed -e 's/^nanomips32//' -e 's/:.*//'`; \
+	      sed <  $(srcdir)/nanomipsrun.c > tmp-run \
+		    -e "s/^sim_/nanomips32$${m}_/" \
+		    -e "s/nanomips_instruction_decode/nanomips32$${m}_instruction_decode/g" \
+		    -e "s/nanomips16_/nanomips16$${m}_/" \
+		    -e "s/nanomips32_/nanomips32$${m}_/" \
+		    -e "s/m32_/m32$${m}_/" ; \
+	      $(SHELL) $(srcdir)/../../move-if-change tmp-run \
+						      nanomips$${m}_run.c ; \
+             ;;\
+	    nanomips64*) \
+	      m=`echo $${t} | sed -e 's/^nanomips64//' -e 's/:.*//'`; \
+	      sed <  $(srcdir)/nanomipsrun.c > tmp-run \
+		    -e "s/^sim_/nanomips64$${m}_/" \
+		    -e "s/nanomips_instruction_decode/nanomips64$${m}_instruction_decode/g" \
+		    -e "s/nanomips16_/nanomips16$${m}_/" \
+		    -e "s/nanomips32_/nanomips64$${m}_/" \
+		    -e "s/m32_/m64$${m}_/" ; \
+	      $(SHELL) $(srcdir)/../../move-if-change tmp-run \
+						      nanomips$${m}_run.c ; \
              ;;\
 	  esac \
 	done
