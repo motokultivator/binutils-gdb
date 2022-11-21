@@ -15157,7 +15157,7 @@ fi
 
       sim_enable_arch_mips=false
   case "${targ}" in
-    all|mips*-*-*)
+    all|mips*-*-*|nanomips*-*-*)
       if test "${targ}" = "${target}"; then
         SIM_PRIMARY_TARGET=mips
       fi
