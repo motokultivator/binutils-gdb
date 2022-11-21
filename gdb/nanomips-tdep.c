@@ -1,0 +1,3407 @@
+/* Target-dependent code for the nanoMIPS architecture, for GDB,
+   the GNU Debugger.
+
+   Copyright (C) 2017-2022 Free Software Foundation, Inc.
+   Contributed by:
+    Jaydeep Patil <jaydeep.patil@imgtec.com>
+    Matthew Fortune <matthew.fortune@imgtec.com>
+    Maciej W. Rozycki <macro@mips.com>
+    Stefan Markovic <stefan.markovic@mips.com>
+    Sara Popadic <sara.popadic@imgtec.com>
+    Dragan Mladjenovic <dragan.mladjenovic@syrmia.com>
+    Aleksandar Rikalo <aleksandar.rikalo@syrmia.com>
+
+   This file is part of GDB.
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+#include "defs.h"
+#include "frame.h"
+#include "inferior.h"
+#include "symtab.h"
+#include "value.h"
+#include "gdbcmd.h"
+#include "language.h"
+#include "gdbcore.h"
+#include "symfile.h"
+#include "objfiles.h"
+#include "gdbtypes.h"
+#include "target.h"
+#include "arch-utils.h"
+#include "regcache.h"
+#include "osabi.h"
+#include "nanomips-tdep.h"
+#include "block.h"
+#include "reggroups.h"
+#include "opcode/nanomips.h"
+#include "elf/mips-common.h"
+#include "elf/nanomips.h"
+#include "elf-bfd.h"
+#include "symcat.h"
+#include "sim-regno.h"
+#include "dis-asm.h"
+#include "disasm.h"
+#include "frame-unwind.h"
+#include "frame-base.h"
+#include "trad-frame.h"
+#include "infcall.h"
+#include "floatformat.h"
+#include "remote.h"
+#include "target-descriptions.h"
+#include "dwarf2/frame.h"
+#include "user-regs.h"
+#include "valprint.h"
+#include "ax.h"
+#include "target-float.h"
+#include <algorithm>
+
+#include "features/nanomips.c"
+
+/* The sizes of registers.  */
+
+enum
+{
+  NANOMIPS32_REGSIZE = 4,
+  NANOMIPS64_REGSIZE = 8
+};
+
+static const char *const nanomips_abi_strings[] = {
+  "auto",
+  "p32",
+  "p64",
+  NULL
+};
+
+/* Enum describing the different kinds of breakpoints.  */
+
+enum nanomips_breakpoint_kind
+{
+  /* 16-bit breakpoint.  */
+  NANOMIPS_BP_KIND_16 = 3,
+
+  /* 32-bit breakpoint.  */
+  NANOMIPS_BP_KIND_32 = 5,
+};
+
+/* The standard register names, and all the valid aliases for them.  */
+struct register_alias
+{
+  const char *name;
+  int regnum;
+};
+
+
+static unsigned int nanomips_debug = 0;
+
+const struct nanomips_regnum *
+nanomips_regnum (struct gdbarch *gdbarch)
+{
+  return gdbarch_tdep<nanomips_gdbarch_tdep> (gdbarch)->regnum;
+}
+
+static int
+nanomips_fp_arg_regnum (struct gdbarch *gdbarch)
+{
+  gdb_assert (nanomips_regnum (gdbarch)->fpr != -1);
+
+  return nanomips_regnum (gdbarch)->fpr + NANOMIPS_FP0_REGNUM;
+}
+
+/* Return 1 if REGNUM refers to a floating-point general register, raw
+   or cooked.  Otherwise return 0.  */
+
+static int
+nanomips_float_register_p (struct gdbarch *gdbarch, int regnum)
+{
+  int rawnum = regnum % gdbarch_num_regs (gdbarch);
+  int fprnum = nanomips_regnum (gdbarch)->fpr;
+
+  return (fprnum != -1
+	  && rawnum >= fprnum + NANOMIPS_FP0_REGNUM
+	  && rawnum < fprnum + NANOMIPS_FCSR_REGNUM);
+}
+
+/* Return 1 if REGNUM refers to a floating-point control register, raw
+   or cooked.  Otherwise return 0.  */
+
+static int
+nanomips_float_control_register_p (struct gdbarch *gdbarch, int regnum)
+{
+  int rawnum = regnum % gdbarch_num_regs (gdbarch);
+  int fprnum = nanomips_regnum (gdbarch)->fpr;
+
+  return (fprnum != -1
+	  && (rawnum == fprnum + NANOMIPS_FCSR_REGNUM
+	      || rawnum == fprnum + NANOMIPS_FIR_REGNUM));
+}
+
+/* Return 1 if REGNUM refers to a DSP accumulator register, raw or cooked.
+   Otherwise return 0.  */
+
+static int
+nanomips_dspacc_register_p (struct gdbarch *gdbarch, int regnum)
+{
+  int rawnum = regnum % gdbarch_num_regs (gdbarch);
+  int dspnum = nanomips_regnum (gdbarch)->dsp;
+
+  return (dspnum != -1
+	  && rawnum >= dspnum + NANOMIPS_DSPHI0_REGNUM
+	  && rawnum < dspnum + NANOMIPS_DSPCTL_REGNUM);
+}
+
+#define FPU_TYPE(gdbarch) (gdbarch_tdep<nanomips_gdbarch_tdep> (gdbarch)->fpu_type)
+
+/* Return the nanoMIPS ABI associated with GDBARCH.  */
+enum nanomips_abi
+nanomips_abi (struct gdbarch *gdbarch)
+{
+  return (gdbarch_tdep<nanomips_gdbarch_tdep> (gdbarch))->nanomips_abi;
+}
+
+int
+nanomips_isa_regsize (struct gdbarch *gdbarch)
+{
+  return gdbarch_tdep<nanomips_gdbarch_tdep> (gdbarch)->register_size;
+}
+
+/* Return the currently configured (or set) saved register size.  */
+
+unsigned int
+nanomips_abi_regsize (struct gdbarch *gdbarch)
+{
+  switch (nanomips_abi (gdbarch))
+    {
+    case NANOMIPS_ABI_P32:
+      return 4;
+    case NANOMIPS_ABI_P64:
+      return 8;
+    case NANOMIPS_ABI_UNKNOWN:
+    default:
+      internal_error_loc (__FILE__, __LINE__, _("bad switch"));
+    }
+}
+
+static void
+nanomips_xfer_register (struct gdbarch *gdbarch, struct regcache *regcache,
+        int reg_num, int length,
+        enum bfd_endian endian, gdb_byte *in,
+        const gdb_byte *out, int buf_offset)
+{
+  int reg_offset = 0;
+
+  gdb_assert (reg_num >= gdbarch_num_regs (gdbarch));
+  /* Need to transfer the left or right part of the register, based on
+     the targets byte order.  */
+  switch (endian)
+    {
+    case BFD_ENDIAN_BIG:
+      reg_offset = register_size (gdbarch, reg_num) - length;
+      break;
+    case BFD_ENDIAN_LITTLE:
+      reg_offset = 0;
+      break;
+    case BFD_ENDIAN_UNKNOWN:  /* Indicates no alignment.  */
+      reg_offset = 0;
+      break;
+    default:
+      internal_error_loc (__FILE__, __LINE__, _("bad switch"));
+    }
+  if (nanomips_debug)
+    gdb_printf (gdb_stderr,
+      "xfer $%d, reg offset %d, buf offset %d, length %d, ",
+      reg_num, reg_offset, buf_offset, length);
+  if (nanomips_debug && out != NULL)
+    {
+      int i;
+      gdb_printf (gdb_stdlog, "out ");
+      for (i = 0; i < length; i++)
+  gdb_printf (gdb_stdlog, "%02x", out[buf_offset + i]);
+    }
+  if (in != NULL)
+    regcache->cooked_read_part (reg_num, reg_offset, length, in + buf_offset);
+  if (out != NULL)
+    regcache->cooked_write_part (reg_num, reg_offset, length, out + buf_offset);
+  if (nanomips_debug && in != NULL)
+    {
+      int i;
+      gdb_printf (gdb_stdlog, "in ");
+      for (i = 0; i < length; i++)
+  gdb_printf (gdb_stdlog, "%02x", in[buf_offset + i]);
+    }
+  if (nanomips_debug)
+    gdb_printf (gdb_stdlog, "\n");
+}
+
+#define VM_MIN_ADDRESS (CORE_ADDR)0x400000
+
+static CORE_ADDR heuristic_proc_start (struct gdbarch *, CORE_ADDR);
+
+static void reinit_frame_cache_sfunc (const char *, int, struct cmd_list_element *);
+
+/* The list of available "set nanomips " and "show nanomips " commands.  */
+
+static struct cmd_list_element *setnanomipscmdlist = NULL;
+static struct cmd_list_element *shownanomipscmdlist = NULL;
+
+/* Return the name of the register corresponding to REGNO.  */
+
+static const char *
+nanomips_register_name (struct gdbarch *gdbarch, int regno)
+{
+  /* GPR names for p32 and p64 ABIs.  */
+  static const char *const gpr_names[]  = {
+    "zero", "at", "t4", "t5", "a0", "a1", "a2", "a3",
+    "a4", "a5", "a6", "a7", "t0", "t1", "t2", "t3",
+    "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7",
+    "t8", "t9", "k0", "k1", "gp", "sp", "raw_fp", "ra"
+  };
+
+  const char *name;
+  /* Map [gdbarch_num_regs .. 2*gdbarch_num_regs) onto the raw registers,
+     but then don't make the raw register names visible.  This (upper)
+     range of user visible register numbers are the pseudo-registers.
+
+     This approach was adopted accommodate the following scenario:
+     It is possible to debug a 64-bit device using a 32-bit
+     programming model.  In such instances, the raw registers are
+     configured to be 64-bits wide, while the pseudo registers are
+     configured to be 32-bits wide.  The registers that the user
+     sees - the pseudo registers - match the users expectations
+     given the programming model being used.  */
+  int rawnum = regno % gdbarch_num_regs (gdbarch);
+  if (regno < gdbarch_num_regs (gdbarch))
+    return "";
+
+  name = tdesc_register_name (gdbarch, rawnum);
+
+  if (rawnum >= 0 && rawnum < 32)
+    {
+      gdb_assert (name != NULL && name[0] != 0);
+      gdb_assert ((sizeof (gpr_names) / sizeof (gpr_names[0])) == 32);
+      return gpr_names[rawnum];
+    }
+
+  return name;
+}
+
+/* Return the groups that a nanoMIPS register can be categorised into.  */
+
+static int
+nanomips_register_reggroup_p (struct gdbarch *gdbarch, int regnum,
+			      const struct reggroup *reggroup)
+{
+  int vector_p;
+  int float_p;
+  int raw_p;
+  int rawnum = regnum % gdbarch_num_regs (gdbarch);
+  int pseudo = regnum / gdbarch_num_regs (gdbarch);
+  if (reggroup == all_reggroup)
+    return pseudo;
+  vector_p = (register_type (gdbarch, regnum))->is_vector ();
+  float_p = (nanomips_float_register_p (gdbarch, rawnum)
+	     || nanomips_float_control_register_p (gdbarch, rawnum));
+  /* FIXME: cagney/2003-04-13: Can't yet use gdbarch_num_regs
+     (gdbarch), as not all architectures are multi-arch.  */
+  raw_p = rawnum < gdbarch_num_regs (gdbarch);
+  if (gdbarch_register_name (gdbarch, regnum) == NULL
+      || gdbarch_register_name (gdbarch, regnum)[0] == '\0')
+    return 0;
+  if (reggroup == float_reggroup)
+    return float_p && pseudo;
+  if (reggroup == vector_reggroup)
+    return vector_p && pseudo;
+  if (reggroup == general_reggroup)
+    return (!vector_p && !float_p) && pseudo;
+  /* Save the pseudo registers.  Need to make certain that any code
+     extracting register values from a saved register cache also uses
+     pseudo registers.  */
+  if (reggroup == save_reggroup)
+    return raw_p && pseudo;
+  /* Restore the same pseudo register.  */
+  if (reggroup == restore_reggroup)
+    return raw_p && pseudo;
+  return 0;
+}
+
+/* Return the groups that a nanoMIPS register can be categorised into.
+   This version is only used if we have a target description which
+   describes real registers (and their groups).  */
+
+static int
+nanomips_tdesc_register_reggroup_p (struct gdbarch *gdbarch, int regnum,
+				    const struct reggroup *reggroup)
+{
+  int rawnum = regnum % gdbarch_num_regs (gdbarch);
+  int pseudo = regnum / gdbarch_num_regs (gdbarch);
+  int ret;
+
+  /* Only save, restore, and display the pseudo registers.  Need to
+     make certain that any code extracting register values from a
+     saved register cache also uses pseudo registers.
+
+     Note: saving and restoring the pseudo registers is slightly
+     strange; if we have 64 bits, we should save and restore all
+     64 bits.  But this is hard and has little benefit.  */
+  if (!pseudo)
+    return 0;
+
+  ret = tdesc_register_in_reggroup_p (gdbarch, rawnum, reggroup);
+  if (ret != -1)
+    return ret;
+
+  return nanomips_register_reggroup_p (gdbarch, regnum, reggroup);
+}
+
+/* Map the symbol table registers which live in the range [1 *
+   gdbarch_num_regs .. 2 * gdbarch_num_regs) back onto the corresponding raw
+   registers.  Take care of alignment and size problems.  */
+
+static enum register_status
+nanomips_pseudo_register_read (struct gdbarch *gdbarch,
+			       struct readable_regcache *regcache,
+			       int cookednum, gdb_byte *buf)
+{
+  int rawnum = cookednum % gdbarch_num_regs (gdbarch);
+  gdb_assert (cookednum >= gdbarch_num_regs (gdbarch)
+	      && cookednum < 2 * gdbarch_num_regs (gdbarch));
+  if (register_size (gdbarch, rawnum) == register_size (gdbarch, cookednum))
+    return regcache->raw_read (rawnum, buf);
+  else if (register_size (gdbarch, rawnum) >
+	   register_size (gdbarch, cookednum))
+    {
+      enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+      LONGEST regval;
+      enum register_status status;
+
+      status = regcache->raw_read (rawnum, &regval);
+      if (status == REG_VALID)
+        store_signed_integer (buf, 4, byte_order, regval);
+      return status;
+    }
+  else
+    internal_error_loc (__FILE__, __LINE__, _("bad register size"));
+}
+
+static void
+nanomips_pseudo_register_write (struct gdbarch *gdbarch,
+				struct regcache *regcache, int cookednum,
+				const gdb_byte *buf)
+{
+  int rawnum = cookednum % gdbarch_num_regs (gdbarch);
+  gdb_assert (cookednum >= gdbarch_num_regs (gdbarch)
+	      && cookednum < 2 * gdbarch_num_regs (gdbarch));
+  if (register_size (gdbarch, rawnum) == register_size (gdbarch, cookednum))
+    regcache->raw_write (rawnum, buf);
+  else if (register_size (gdbarch, rawnum) >
+	   register_size (gdbarch, cookednum))
+    {
+      /* Sign extend the shortened version of the register prior
+         to placing it in the raw register.  This is required for
+         some mips64 parts in order to avoid unpredictable behavior.  */
+      enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+      LONGEST regval = extract_signed_integer (buf, 4, byte_order);
+      regcache_raw_write_signed (regcache, rawnum, regval);
+    }
+  else
+    internal_error_loc (__FILE__, __LINE__, _("bad register size"));
+}
+
+static int
+nanomips_ax_pseudo_register_collect (struct gdbarch *gdbarch,
+				     struct agent_expr *ax, int reg)
+{
+  int rawnum = reg % gdbarch_num_regs (gdbarch);
+  gdb_assert (reg >= gdbarch_num_regs (gdbarch)
+	      && reg < 2 * gdbarch_num_regs (gdbarch));
+
+  ax_reg_mask (ax, rawnum);
+
+  return 0;
+}
+
+static int
+nanomips_ax_pseudo_register_push_stack (struct gdbarch *gdbarch,
+				    struct agent_expr *ax, int reg)
+{
+  int rawnum = reg % gdbarch_num_regs (gdbarch);
+  gdb_assert (reg >= gdbarch_num_regs (gdbarch)
+	      && reg < 2 * gdbarch_num_regs (gdbarch));
+  if (register_size (gdbarch, rawnum) >= register_size (gdbarch, reg))
+    {
+      ax_reg (ax, rawnum);
+
+      if (register_size (gdbarch, rawnum) > register_size (gdbarch, reg))
+        {
+	  if (gdbarch_byte_order (gdbarch) != BFD_ENDIAN_BIG)
+	    {
+	      ax_const_l (ax, 32);
+	      ax_simple (ax, aop_lsh);
+	    }
+	  ax_const_l (ax, 32);
+	  ax_simple (ax, aop_rsh_signed);
+	}
+    }
+  else
+    internal_error_loc (__FILE__, __LINE__, _("bad register size"));
+
+  return 0;
+}
+
+/* Table to translate nanomips 3-bit register field to
+   actual register number.  */
+static const signed char reg3_to_reg[8] = { 16, 17, 18, 19, 4, 5, 6, 7 };
+
+/* Heuristic_proc_start may hunt through the text section for a long
+   time across a 2400 baud serial line.  Allows the user to limit this
+   search.  */
+
+static int heuristic_fence_post = 0;
+
+/* Convert to/from a register and the corresponding memory value.  */
+
+/* This predicate tests for the case of a 4 byte floating point
+   value that is being transferred to or from a floating point
+   register which is 8 bytes wide.  */
+
+static int
+nanomips_convert_register_float_case_p (struct gdbarch *gdbarch, int regnum,
+					struct type *type)
+{
+  return (register_size (gdbarch, regnum) == 8
+	  && nanomips_float_register_p (gdbarch, regnum)
+	  && type->code () == TYPE_CODE_FLT && type->length () == 4);
+}
+
+/* This predicate tests for the case of a value of less than 8
+   bytes in width that is being transfered to or from an 8 byte
+   general purpose register.  */
+static int
+nanomips_convert_register_gpreg_case_p (struct gdbarch *gdbarch, int regnum,
+					struct type *type)
+{
+  int num_regs = gdbarch_num_regs (gdbarch);
+
+  return (register_size (gdbarch, regnum) == 8
+          && regnum % num_regs > 0 && regnum % num_regs < 32
+          && type->length () < 8);
+}
+
+static int
+nanomips_convert_register_p (struct gdbarch *gdbarch,
+			     int regnum, struct type *type)
+{
+  return (nanomips_convert_register_float_case_p (gdbarch, regnum, type)
+	  || nanomips_convert_register_gpreg_case_p (gdbarch, regnum, type));
+}
+
+static int
+nanomips_register_to_value (frame_info_ptr frame, int regnum,
+			    struct type *type, gdb_byte *to,
+			    int *optimizedp, int *unavailablep)
+{
+  struct gdbarch *gdbarch = get_frame_arch (frame);
+
+  if (nanomips_convert_register_float_case_p (gdbarch, regnum, type))
+    {
+      /* single comes from low half of 64-bit register */
+      if (gdbarch_byte_order (gdbarch) == BFD_ENDIAN_BIG)
+	{
+	  if (!get_frame_register_bytes (frame, regnum, 4, {to + 0, 4},
+					 optimizedp, unavailablep))
+	    return 0;
+	}
+      else
+	{
+	  if (!get_frame_register_bytes (frame, regnum, 0, {to + 0, 4},
+					 optimizedp, unavailablep))
+	    return 0;
+	}
+      *optimizedp = *unavailablep = 0;
+      return 1;
+    }
+  else if (nanomips_convert_register_gpreg_case_p (gdbarch, regnum, type))
+    {
+      int len = type->length ();
+      CORE_ADDR offset;
+
+      offset = gdbarch_byte_order (gdbarch) == BFD_ENDIAN_BIG ? 8 - len : 0;
+      if (!get_frame_register_bytes (frame, regnum, offset, {to, (size_t)len},
+				     optimizedp, unavailablep))
+	return 0;
+
+      *optimizedp = *unavailablep = 0;
+      return 1;
+    }
+  else
+    {
+      internal_error_loc (__FILE__, __LINE__,
+                      _("nanomips_register_to_value: unrecognized case"));
+    }
+}
+
+static void
+nanomips_value_to_register (frame_info_ptr frame, int regnum,
+			    struct type *type, const gdb_byte *from)
+{
+  struct gdbarch *gdbarch = get_frame_arch (frame);
+
+  if (nanomips_convert_register_float_case_p (gdbarch, regnum, type))
+    {
+      /* single goes in low half of 64-bit register */
+      if (gdbarch_byte_order (gdbarch) == BFD_ENDIAN_BIG)
+	put_frame_register_bytes (frame, regnum, 4, {from, 4});
+      else
+	put_frame_register_bytes (frame, regnum, 0, {from, 4});
+    }
+  else if (nanomips_convert_register_gpreg_case_p (gdbarch, regnum, type))
+    {
+      gdb_byte fill[8];
+      int len = type->length ();
+
+      /* Sign extend values, irrespective of type, that are stored to
+         a 64-bit general purpose register.  (32-bit unsigned values
+	 are stored as signed quantities within a 64-bit register.
+	 When performing an operation, in compiled code, that combines
+	 a 32-bit unsigned value with a signed 64-bit value, a type
+	 conversion is first performed that zeroes out the high 32 bits.)  */
+      if (gdbarch_byte_order (gdbarch) == BFD_ENDIAN_BIG)
+	{
+	  if (from[0] & 0x80)
+	    store_signed_integer (fill, 8, BFD_ENDIAN_BIG, -1);
+	  else
+	    store_signed_integer (fill, 8, BFD_ENDIAN_BIG, 0);
+	  put_frame_register_bytes (frame, regnum, 0, {fill, (size_t)(8 - len)});
+	  put_frame_register_bytes (frame, regnum, 8 - len, {from, (size_t)len});
+	}
+      else
+	{
+	  if (from[len-1] & 0x80)
+	    store_signed_integer (fill, 8, BFD_ENDIAN_LITTLE, -1);
+	  else
+	    store_signed_integer (fill, 8, BFD_ENDIAN_LITTLE, 0);
+	  put_frame_register_bytes (frame, regnum, 0, {from, (size_t)len});
+	  put_frame_register_bytes (frame, regnum, len, {fill, (size_t)(8 - len)});
+	}
+    }
+  else
+    {
+      internal_error_loc (__FILE__, __LINE__,
+                      _("nanomips_value_to_register: unrecognized case"));
+    }
+}
+
+/* Return the GDB type for the pseudo register REGNUM, which is the
+   ABI-level view.  This function is only called if there is a target
+   description which includes registers, so we know precisely the
+   types of hardware registers.  */
+
+static struct type *
+nanomips_pseudo_register_type (struct gdbarch *gdbarch, int regnum)
+{
+  const int num_regs = gdbarch_num_regs (gdbarch);
+  int rawnum = regnum % num_regs;
+  struct type *rawtype;
+
+  gdb_assert (regnum >= num_regs && regnum < 2 * num_regs);
+
+  /* Absent registers are still absent.  */
+  rawtype = gdbarch_register_type (gdbarch, rawnum);
+  if (rawtype->length () == 0)
+    return rawtype;
+
+  /* Present the floating point registers however the hardware did;
+     do not try to convert between FPU layouts.  */
+  if (nanomips_float_register_p (gdbarch, rawnum))
+    return rawtype;
+
+  /* Floating-point control registers are always 32-bit even though for
+     backwards compatibility reasons 64-bit targets will transfer them
+     as 64-bit quantities even if using XML descriptions.  */
+  if (nanomips_float_control_register_p (gdbarch, rawnum))
+    return builtin_type (gdbarch)->builtin_int32;
+
+  /* Use pointer types for registers if we can.  For n32 we can not,
+     since we do not have a 64-bit pointer type.  */
+  if (nanomips_abi_regsize (gdbarch)
+      == (builtin_type (gdbarch)->builtin_data_ptr)->length())
+    {
+      if (rawnum == NANOMIPS_SP_REGNUM
+	  || rawnum == nanomips_regnum (gdbarch)->badvaddr)
+	return builtin_type (gdbarch)->builtin_data_ptr;
+      else if (rawnum == NANOMIPS_PC_REGNUM)
+	return builtin_type (gdbarch)->builtin_func_ptr;
+    }
+
+  if (nanomips_abi_regsize (gdbarch) == 4 && rawtype->length () == 8
+      && ((rawnum >= NANOMIPS_ZERO_REGNUM && rawnum <= NANOMIPS_PC_REGNUM)
+	  || rawnum == nanomips_regnum (gdbarch)->badvaddr
+	  || rawnum == nanomips_regnum (gdbarch)->status
+	  || rawnum == nanomips_regnum (gdbarch)->cause
+	  || nanomips_dspacc_register_p (gdbarch, rawnum)))
+    return builtin_type (gdbarch)->builtin_int32;
+
+  /* For all other registers, pass through the hardware type.  */
+  return rawtype;
+}
+
+/* Should the upper word of 64-bit addresses be zeroed?  */
+static enum auto_boolean mask_address_var = AUTO_BOOLEAN_AUTO;
+
+static int
+nanomips_mask_address_p (const struct nanomips_gdbarch_tdep *tdep)
+{
+  switch (mask_address_var)
+    {
+    case AUTO_BOOLEAN_TRUE:
+      return 1;
+    case AUTO_BOOLEAN_FALSE:
+      return 0;
+      break;
+    case AUTO_BOOLEAN_AUTO:
+      return tdep->default_mask_address_p;
+    default:
+      internal_error_loc (__FILE__, __LINE__,
+		      _("nanomips_mask_address_p: bad switch"));
+      return -1;
+    }
+}
+
+static void
+show_mask_address (struct ui_file *file, int from_tty,
+		   struct cmd_list_element *c, const char *value)
+{
+  struct nanomips_gdbarch_tdep *tdep = (struct nanomips_gdbarch_tdep*) (target_gdbarch ());
+
+  deprecated_show_value_hack (file, from_tty, c, value);
+  switch (mask_address_var)
+    {
+    case AUTO_BOOLEAN_TRUE:
+      gdb_printf ("The 32 bit nanomips address mask is enabled\n");
+      break;
+    case AUTO_BOOLEAN_FALSE:
+      gdb_printf ("The 32 bit nanomips address mask is disabled\n");
+      break;
+    case AUTO_BOOLEAN_AUTO:
+      gdb_printf
+	("The 32 bit address mask is set automatically.  Currently %s\n",
+	 nanomips_mask_address_p (tdep) ? "enabled" : "disabled");
+      break;
+    default:
+      internal_error_loc (__FILE__, __LINE__, _("show_mask_address: bad switch"));
+      break;
+    }
+}
+
+/* nanoMIPS believes that the PC has a sign extended value.  Perhaps
+   all registers should be sign extended for simplicity?  */
+
+static CORE_ADDR
+nanomips_read_pc (struct readable_regcache *regcache)
+{
+  int regnum = gdbarch_pc_regnum (regcache->arch ());
+  LONGEST pc;
+
+  regcache->cooked_read (regnum, &pc);
+  return pc;
+}
+
+static CORE_ADDR
+nanomips_unwind_pc (struct gdbarch *gdbarch, frame_info_ptr next_frame)
+{
+  return frame_unwind_register_signed
+	   (next_frame, gdbarch_pc_regnum (gdbarch));
+}
+
+static CORE_ADDR
+nanomips_unwind_sp (struct gdbarch *gdbarch, frame_info_ptr next_frame)
+{
+  return frame_unwind_register_signed
+	   (next_frame, gdbarch_num_regs (gdbarch) + NANOMIPS_SP_REGNUM);
+}
+
+/* Assuming THIS_FRAME is a dummy, return the frame ID of that
+   dummy frame.  The frame ID's base needs to match the TOS value
+   saved by save_dummy_frame_tos(), and the PC match the dummy frame's
+   breakpoint.  */
+
+static struct frame_id
+nanomips_dummy_id (struct gdbarch *gdbarch, frame_info_ptr this_frame)
+{
+  return frame_id_build
+	   (get_frame_register_signed (this_frame,
+				       gdbarch_num_regs (gdbarch)
+				       + NANOMIPS_SP_REGNUM),
+	    get_frame_pc (this_frame));
+}
+
+/* Implement the "write_pc" gdbarch method.  */
+
+void
+nanomips_write_pc (struct regcache *regcache, CORE_ADDR pc)
+{
+  int regnum = gdbarch_pc_regnum (regcache->arch ());
+  regcache_cooked_write_unsigned (regcache, regnum, pc);
+}
+
+/* Fetch and return 16-bit instruction from the specified location.  */
+
+static ULONGEST
+nanomips_fetch_stack_slot (struct gdbarch *gdbarch, CORE_ADDR sp, int offset)
+{
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  return read_memory_unsigned_integer (sp + offset, 4, byte_order);
+}
+
+static ULONGEST
+nanomips_fetch_instruction (struct gdbarch *gdbarch,
+			    CORE_ADDR addr, int *errp)
+{
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  gdb_byte buf[INSN16_SIZE];
+  int err;
+
+  err = target_read_memory (addr, buf, INSN16_SIZE);
+  if (errp != NULL)
+    *errp = err;
+  if (err != 0)
+    {
+      if (errp == NULL)
+	memory_error (TARGET_XFER_E_IO, addr);
+      return 0;
+    }
+  return extract_unsigned_integer (buf, INSN16_SIZE, byte_order);
+}
+
+/* MicroMIPS instruction fields.  */
+#define micromips_op(x) ((x) >> 10)
+
+/* 16-bit/32-bit-high-part instruction formats, B and S refer to the lowest
+   bit and the size respectively of the field extracted.  */
+#define b0s4_imm(x) ((x) & 0xf)
+#define b0s5_imm(x) ((x) & 0x1f)
+#define b0s5_reg(x) ((x) & 0x1f)
+#define b0s7_imm(x) ((x) & 0x7f)
+#define b0s8_imm(x) ((x) & 0xff)
+#define b0s10_imm(x) ((x) & 0x3ff)
+#define b0u13_15s1_imm(x) (((x) & 0x1fff) | (((x) & 0x8000) >> 2))
+#define b1s4_imm(x) (((x) >> 1) & 0xf)
+#define b1s9_imm(x) (((x) >> 1) & 0x1ff)
+#define b2s1_op(x) (((x) >> 2) & 0x1)
+#define b2s3_cc(x) (((x) >> 2) & 0x7)
+#define b3s2_op(x) (((x) >> 3) & 0x3)
+#define b3s9_imm(x) (((x) >> 3) & 0x1ff)
+#define b4s2_regl(x) (((x) >> 4) & 0x3)
+#define b4s3_reg(x) (((x) >> 4) & 0x7)
+#define b4s4_imm(x) (((x) >> 4) & 0xf)
+#define b5s5_op(x) (((x) >> 5) & 0x1f)
+#define b5s5_reg(x) (((x) >> 5) & 0x1f)
+#define b6s4_op(x) (((x) >> 6) & 0xf)
+#define b7s3_reg(x) (((x) >> 7) & 0x7)
+#define b8s2_regl(x) (((x) >> 8) & 0x3)
+#define b8s7_op(x) (((x) >> 8) & 0x7f)
+
+/* 32-bit instruction formats, B and S refer to the lowest bit and the size
+   respectively of the field extracted.  */
+#define b0s6_op(x) ((x) & 0x3f)
+#define b0s10_op(x) ((x) & 0x3ff)
+#define b0s11_op(x) ((x) & 0x7ff)
+#define b0s12_imm(x) ((x) & 0xfff)
+#define b0u16_imm(x) ((x) & 0xffff)
+#define b0s21_imm(x) ((x) & 0x1fffff)
+#define b0s26_imm(x) ((x) & 0x3ffffff)
+#define b6s10_ext(x) (((x) >> 6) & 0x3ff)
+#define b9s3_op(x) (((x) >> 9) & 0x7)
+#define b11s5_reg(x) (((x) >> 11) & 0x1f)
+#define b16s5_reg(x) (((x) >> 16) & 0x1f)
+#define b21s5_reg(x) (((x) >> 21) & 0x1f)
+#define b11s7_imm(x) (((x) >> 11) & 0x7f)
+#define b12s4_op(x) (((x) >> 12) & 0xf)
+#define b12s5_op(x) (((x) >> 12) & 0x1f)
+#define b14s2_op(x) (((x) >> 14) & 0x3)
+#define b16s4_imm(x) (((x) >> 16) & 0xf)
+
+/* Return the size in bytes of the instruction INSN encoded in the ISA
+   instruction set.  */
+
+static int
+nanomips_insn_size (ULONGEST insn)
+{
+  if (micromips_op (insn) == 0x18)
+    return 3 * INSN16_SIZE;
+  else if ((micromips_op (insn) & 0x4) == 0x0)
+    return 2 * INSN16_SIZE;
+  else
+    return INSN16_SIZE;
+}
+
+/* Calculate the address of the next nanoMIPS instruction to execute
+   after the instruction at the address PC.  The nanomips_next_pc
+   function supports single_step when the remote target monitor or stub
+   is not developed enough to do a single_step.  It works by decoding the
+   current instruction and predicting where a branch will go.  This isn't
+   hard because all the data is available.  */
+
+static CORE_ADDR
+nanomips_next_pc (struct regcache *regcache, CORE_ADDR pc)
+{
+  struct gdbarch *gdbarch = regcache->arch ();
+  ULONGEST insn;
+  CORE_ADDR offset, sp, ra;
+  int op, sreg, treg, uimm, count;
+  LONGEST val_rs, val_rt;
+
+  insn = nanomips_fetch_instruction (gdbarch, pc, NULL);
+  pc += INSN16_SIZE;
+  switch (nanomips_insn_size (insn))
+    {
+    /* 48-bit instructions.  */
+    case 3 * INSN16_SIZE:
+      /* No branch or jump instructions in this category.  */
+      pc += 2 * INSN16_SIZE;
+      break;
+
+    /* 32-bit instructions.  */
+    case 2 * INSN16_SIZE:
+      insn <<= 16;
+      insn |= nanomips_fetch_instruction (gdbarch, pc, NULL);
+      pc += INSN16_SIZE;
+      switch (micromips_op (insn >> 16))
+      	{
+      	case 0x0: /* P32 */
+      	  op = b5s5_op (insn >> 16);
+      	  switch (op)
+      	    {
+      	    case 0x0: /* P.RI */
+      	      switch (b3s2_op (insn >> 16))
+      		{
+      		case 0x1: /* SYSCALL */
+      		  if (b2s1_op (insn >> 16) == 0)
+      		    {
+      		      struct nanomips_gdbarch_tdep *tdep;
+
+      		      tdep = gdbarch_tdep<nanomips_gdbarch_tdep> (gdbarch);
+      		      if (tdep->syscall_next_pc != NULL)
+      			pc = tdep->syscall_next_pc (get_current_frame (), pc);
+      		    }
+      		  break;
+      		}
+      	      break;
+      	    }
+      	  break;
+
+      	case 0x2: /* MOVE.BALC */
+      	  offset = ((insn & 1) << 20 | ((insn >> 1) & 0xfffff)) << 1;
+      	  offset = (offset ^ 0x200000) - 0x200000;
+      	  pc += offset;
+      	  break;
+
+      	case 0xa: /* BALC, BC */
+      	  offset = ((insn & 1) << 24 | ((insn >> 1) & 0xffffff)) << 1;
+      	  offset = (offset ^ 0x2000000) - 0x2000000;
+      	  pc += offset;
+      	  break;
+
+      	case 0x12: /* P.J P.BREG P.BALRC P.BALRSC */
+      	  op = b12s4_op (insn);
+      	  sreg = b0s5_reg (insn >> 16);
+      	  treg = b5s5_reg (insn >> 16);
+      	  if (op == 0x8) /* BALRSC, BRSC */
+      	    {
+      	      val_rs = regcache_raw_get_signed (regcache, sreg);
+      	      pc += (val_rs << 1);
+      	    }
+      	  else if (op == 0 || op == 1) /* JALRC JALRC.HB */
+      	    pc = regcache_raw_get_signed (regcache, sreg);
+      	  break;
+
+      	case 0x20: /* PP.SR */
+      	  if ((b12s4_op (insn) == 0x3) && ((insn & 3) == 3)) /* RESTORE.JRC */
+      	   {
+                   sp = regcache_raw_get_signed (regcache, NANOMIPS_SP_REGNUM);
+                   ra = regcache_raw_get_signed (regcache, NANOMIPS_RA_REGNUM);
+                   sp += (((insn >> 3) & 0x1ff) << 3);
+                   count = ((insn >> 16) & 0xf);
+                   treg = b5s5_reg(insn >> 16);
+                   if (count != 0 && treg <= 31 && (treg + count) > 31)
+                     ra = nanomips_fetch_stack_slot (gdbarch, sp, -(31 - treg + 1) * 4);
+                   pc = ra;
+                 }
+      	  break;
+
+      	case 0x22: /* P.BR1 */
+      	  op = b14s2_op (insn);
+      	  sreg = b0s5_reg (insn >> 16);
+      	  treg = b5s5_reg (insn >> 16);
+      	  val_rs = regcache_raw_get_signed (regcache, sreg);
+      	  val_rt = regcache_raw_get_signed (regcache, treg);
+      	  offset = ((insn & 1) << 13 | ((insn >> 1) & 0x1fff)) << 1;
+      	  offset = (offset ^ 0x4000) - 0x4000;
+      	  if ((op == 0 && val_rs == val_rt) /* BEQC */
+      	      || (op == 2 && val_rs >= val_rt) /* BGEC */
+      	      || (op == 3
+      		  && (ULONGEST) val_rs >= (ULONGEST) val_rt)) /* BGEUC */
+      	    pc += offset;
+      	  break;
+
+      	case 0x2a: /* P.BR2 */
+      	  op = b14s2_op (insn);
+      	  sreg = b0s5_reg (insn >> 16);
+      	  treg = b5s5_reg (insn >> 16);
+      	  val_rs = regcache_raw_get_signed (regcache, sreg);
+      	  val_rt = regcache_raw_get_signed (regcache, treg);
+      	  offset = ((insn & 1) << 13 | ((insn >> 1) & 0x1fff)) << 1;
+      	  offset = (offset ^ 0x4000) - 0x4000;
+      	  if ((op == 0 && val_rs != val_rt) /* BNEC */
+      	      || (op == 2 && val_rs < val_rt) /* BLTC */
+      	      || (op == 3
+      		  && (ULONGEST) val_rs < (ULONGEST) val_rt)) /* BLTUC */
+      	    pc += offset;
+      	  break;
+
+      	case 0x32: /* P.BRI */
+      	  op = b2s3_cc (insn >> 16);
+      	  treg = b5s5_reg (insn >> 16);
+      	  val_rt = regcache_raw_get_signed (regcache, treg);
+      	  offset = ((insn & 1) << 10 | ((insn >> 1) & 0x3ff)) << 1;
+      	  offset = (offset ^ 0x800) - 0x800;
+      	  uimm = b11s7_imm (insn);
+      	  if ((op == 0 && val_rt == uimm) /* BEQIC */
+                    || (op == 1 && ((val_rt &  (1 << uimm)) == 0)) /* BBEQZC */
+      	      || (op == 2 && val_rt >= uimm) /* BGEIC */
+      	      || (op == 3 && (ULONGEST) val_rt >= uimm) /* BGEIUC */
+      	      || (op == 4 && val_rt != uimm) /* BNEIC */
+                    || (op == 5 && ((val_rt &  (1 << uimm)) != 0)) /* BBNEZC */
+      	      || (op == 6 && val_rt < uimm) /* BLTIC */
+      	      || (op == 7 && (ULONGEST) val_rt < uimm)) /* BLTIUC */
+      	    pc += offset;
+      	  break;
+
+      	case 0x3a: /* P.BZ */
+      	  op = (insn & 0x80000); /* 20th bit */
+      	  treg = b5s5_reg (insn >> 16);
+      	  val_rt = regcache_raw_get_signed (regcache, treg);
+      	  offset = ((insn & 1) << 19 | ((insn >> 1) & 0x7ffff)) << 1;
+      	  offset = (offset ^ 0x100000) - 0x100000;
+      	  if ((op == 0 && val_rt == 0) /* BEQZC */
+      	      || (op != 0 && val_rt != 0)) /* BNEZC */
+      	    pc += offset;
+      	  break;
+
+      	default:
+      	  break;
+      	}
+      break;
+
+    /* 16-bit instructions.  */
+    case INSN16_SIZE:
+      switch (micromips_op (insn))
+	{
+	case 0x4: /* P16 */
+	  op = b5s5_op (insn);
+	  switch (op)
+	    {
+	    case 0x0: /* P16.RI */
+	      switch (b3s2_op (insn))
+		{
+		case 0x1: /* SYSCALL[16] */
+		  if (b2s1_op (insn) == 0)
+		    {
+		      struct nanomips_gdbarch_tdep *tdep;
+
+		      tdep = gdbarch_tdep<nanomips_gdbarch_tdep> (gdbarch);
+		      if (tdep->syscall_next_pc != NULL)
+			pc = tdep->syscall_next_pc (get_current_frame (), pc);
+		    }
+		  break;
+		}
+	      break;
+	    }
+	  break;
+
+	case 0x6: /* BC[16] */
+	case 0xe: /* BALC[16] */
+	  offset = ((insn & 1) << 9 | ((insn >> 1) & 0x1ff)) << 1;
+	  offset = (offset ^ 0x400) - 0x400;
+	  pc += offset;
+	  break;
+
+	case 0x7: /* RESTORE.JRC[16] */
+	  if ((insn & 1) == 0 && (insn & 0x20) == 0x20 && ((insn >> 8) & 1) == 1)
+          {
+            sp = regcache_raw_get_signed (regcache, NANOMIPS_SP_REGNUM);
+	    ra = regcache_raw_get_signed (regcache, NANOMIPS_RA_REGNUM);
+            sp += (((insn >> 4) & 0xf) << 4);
+            count = insn & 0xf;
+            treg = ((insn >> 9) & 0x1) ? NANOMIPS_RA_REGNUM : NANOMIPS_FP_REGNUM;
+            if (count != 0 && treg + count > 31) {
+                ra = nanomips_fetch_stack_slot (gdbarch, sp, -(31 - treg + 1) * 4);
+            }
+            pc = ra;
+          }
+	  break;
+
+	case 0x26: /* BEQZC[16] */
+	  treg = reg3_to_reg[b7s3_reg (insn)];
+	  val_rt = regcache_raw_get_signed (regcache, treg);
+	  offset = ((insn & 1) << 6 | ((insn >> 1) & 0x3f)) << 1;
+	  offset = (offset ^ 0x80) - 0x80;
+	  if (val_rt == 0)
+	    pc += offset;
+	  break;
+
+	case 0x2e: /* BNEZC[16] */
+	  treg = reg3_to_reg[b7s3_reg (insn)];
+	  val_rt = regcache_raw_get_signed (regcache, treg);
+	  offset = ((insn & 1) << 6 | ((insn >> 1) & 0x3f)) << 1;
+	  offset = (offset ^ 0x80) - 0x80;
+	  if (val_rt != 0)
+	    pc += offset;
+	  break;
+
+	case 0x36: /* P16.BR P16.JRC */
+	  sreg = b4s3_reg (insn);
+	  treg = b7s3_reg (insn);
+	  val_rs = regcache_raw_get_signed (regcache, reg3_to_reg[sreg]);
+	  val_rt = regcache_raw_get_signed (regcache, reg3_to_reg[treg]);
+	  offset = insn & 0xf;
+	  /* BEQC[16] BEQC[16] */
+	  if ((sreg < treg && offset != 0 && val_rs == val_rt)
+	      || (sreg >= treg && offset != 0 && val_rs != val_rt))
+	    pc += (offset << 1);
+	  else if (offset == 0) /* JALRC[16] JRC */
+	    pc = regcache_raw_get_signed (regcache, b5s5_reg(insn));
+	  break;
+
+	default:
+	  break;
+	}
+      break;
+
+    default:
+      break;
+    }
+  return pc;
+}
+
+struct nanomips_frame_cache
+{
+  CORE_ADDR base;
+  struct trad_frame_saved_reg *saved_regs;
+};
+
+/* Set a register's saved stack address in temp_saved_regs.  If an
+   address has already been set for this register, do nothing; this
+   way we will only recognize the first save of a given register in a
+   function prologue.
+
+   For simplicity, save the address in both [0 .. gdbarch_num_regs) and
+   [gdbarch_num_regs .. 2*gdbarch_num_regs).
+   Strictly speaking, only the second range is used as it is only second
+   range (the ABI instead of ISA registers) that comes into play when finding
+   saved registers in a frame.  */
+
+static void
+set_reg_offset (struct gdbarch *gdbarch, struct nanomips_frame_cache *this_cache,
+		int regnum, CORE_ADDR offset)
+{
+  if (this_cache != NULL
+      && this_cache->saved_regs[regnum].addr() == -1)
+    {
+      this_cache->saved_regs[regnum + 0 * gdbarch_num_regs (gdbarch)].set_addr(
+        offset);
+      this_cache->saved_regs[regnum + 1 * gdbarch_num_regs (gdbarch)].set_addr(
+        offset);
+    }
+}
+
+/* Analyze the function prologue from START_PC to LIMIT_PC.  Return
+   the address of the first instruction past the prologue.  */
+
+static CORE_ADDR
+nanomips_scan_prologue (struct gdbarch *gdbarch,
+			CORE_ADDR start_pc, CORE_ADDR limit_pc,
+			frame_info_ptr this_frame,
+			struct nanomips_frame_cache *this_cache)
+{
+  CORE_ADDR end_prologue_addr;
+  int prev_non_prologue_insn = 0;
+  int frame_reg = NANOMIPS_SP_REGNUM;
+  int this_non_prologue_insn;
+  int non_prologue_insns = 0;
+  long frame_offset = 0;	/* Size of stack frame.  */
+  long frame_adjust = 0;	/* Offset of FP from SP.  */
+  CORE_ADDR prev_pc;
+  CORE_ADDR cur_pc;
+  ULONGEST insn;		/* current instruction */
+  CORE_ADDR sp;
+  long offset;
+  long sp_adj;
+  long v1_off = 0;		/* The assumption is LUI will replace it.  */
+  int breg;
+  int dreg;
+  int sreg;
+  int treg;
+  int loc;
+  int op;
+
+  /* Can be called when there's no process, and hence when there's no
+     THIS_FRAME.  */
+  if (this_frame != NULL)
+    sp = get_frame_register_signed (this_frame,
+				    gdbarch_num_regs (gdbarch)
+				    + NANOMIPS_SP_REGNUM);
+  else
+    sp = 0;
+
+  if (limit_pc > start_pc + 200)
+    limit_pc = start_pc + 200;
+  prev_pc = start_pc;
+
+  /* Permit at most one non-prologue non-control-transfer instruction
+     in the middle which may have been reordered by the compiler for
+     optimisation.  */
+  for (cur_pc = start_pc; cur_pc < limit_pc; cur_pc += loc)
+    {
+      this_non_prologue_insn = 0;
+      sp_adj = 0;
+      loc = 0;
+      insn = nanomips_fetch_instruction (gdbarch, cur_pc, NULL);
+      loc += INSN16_SIZE;
+      switch (nanomips_insn_size (insn))
+	{
+	/* 48-bit instructions.  */
+	case 3 * INSN16_SIZE:
+	  if (micromips_op (insn) == 0x18)
+	    {
+	      op = b0s5_imm (insn);
+	      treg = b5s5_reg (insn);
+	      offset = nanomips_fetch_instruction (gdbarch, cur_pc + 2, NULL);
+	      offset <<= 16;
+	      offset |= nanomips_fetch_instruction (gdbarch, cur_pc + 4, NULL);
+	      if (op == 0x0 && treg == 3) /* LI48 $v1, imm32 */
+		v1_off = offset;
+	      else if (op == 0x1 /* ADDIU48 $sp, imm32 */
+		       && treg == NANOMIPS_SP_REGNUM)
+		sp_adj = offset;
+	      else
+		this_non_prologue_insn = 1;
+	    }
+	      else
+		this_non_prologue_insn = 1;
+	  break;
+
+	/* 32-bit instructions.  */
+	case 2 * INSN16_SIZE:
+	  insn <<= 16;
+	  insn |= nanomips_fetch_instruction (gdbarch,
+					  cur_pc + loc, NULL);
+	  loc += INSN16_SIZE;
+
+	  switch (micromips_op (insn >> 16))
+	    {
+	    case 0x0: /* PP.ADDIU bits 000000 */
+	      sreg = b0s5_reg (insn >> 16);
+	      treg = b5s5_reg (insn >> 16);
+	      offset = b0u16_imm (insn);
+	      if (sreg == treg
+		  && treg == NANOMIPS_SP_REGNUM) /* ADDIU $sp, $sp, imm */
+		sp_adj = offset;
+	      else if (sreg == NANOMIPS_SP_REGNUM
+		       && treg == NANOMIPS_FP_REGNUM) /* ADDIU $fp, $sp, imm */
+		{
+		  frame_adjust = offset;
+		  frame_reg = NANOMIPS_FP_REGNUM;
+		}
+	      else if (sreg != NANOMIPS_GP_REGNUM
+		       || treg != NANOMIPS_GP_REGNUM)
+		this_non_prologue_insn = 1;
+	      break;
+
+	    case 0x8: /* P32A: bits 001000 */
+	      op = b0s10_op (insn);
+	      sreg = b0s5_reg (insn >> 16);
+	      treg = b5s5_reg (insn >> 16);
+	      dreg = b11s5_reg (insn);
+	      if (op == 0x1d0	/* SUBU: bits 001000 0111010000 */
+		  && dreg == NANOMIPS_SP_REGNUM && sreg == NANOMIPS_SP_REGNUM
+		  && treg == 3)	/* SUBU $sp, $v1 */
+		sp_adj = v1_off;
+	      else
+		this_non_prologue_insn = 1;
+	      break;
+
+	    case 0x20: /* P.U12 bits 100000 */
+	      /* SAVE: bits 100000 rt 0 count 0011 */
+	      if (b12s4_op (insn) == 0x3)
+		{
+		  int rt, this_rt, gp, use_gp;
+		  int counter = 0, count = b16s4_imm (insn);
+		  long this_offset;
+		  offset = b3s9_imm (insn) << 3;
+		  rt = b21s5_reg (insn);
+		  sp_adj = -offset;
+		  gp = (insn >> 2) & 1;
+		  while (counter != count)
+		    {
+		      use_gp = gp & (counter == count - 1);
+		      if (use_gp)
+			this_rt = NANOMIPS_GP_REGNUM;
+		      else
+			this_rt = (((rt >> 4) & 1) << 4) | (rt + counter);
+		      this_offset = (counter + 1) << 2;
+		      set_reg_offset (gdbarch, this_cache, this_rt,
+				      sp + offset - this_offset);
+		      counter++;
+		    }
+		}
+	      else if (b12s4_op (insn) == 8) /* ADDIU[NEG]: bits 100000 1000 */
+		{
+		  sreg = b0s5_reg (insn >> 16);
+		  treg = b5s5_reg (insn >> 16);
+		  if (sreg == treg && sreg == NANOMIPS_SP_REGNUM)
+			  /* ADDIU[NEG] $sp, $sp, imm */
+		    {
+		      offset = b0s11_op (insn);
+		      sp_adj = -offset;
+		    }
+		}
+	      else if (b12s4_op (insn) == 0) /* ORI: bits 100000 0000 */
+		{
+		  sreg = b0s5_reg (insn >> 16);
+		  treg = b5s5_reg (insn >> 16);
+		  if (sreg == treg && treg == 3) /* ORI $v1, $v1, imm */
+		    v1_off |= b0s11_op (insn);
+		  else
+		    this_non_prologue_insn = 1;
+		}
+		else
+		  this_non_prologue_insn = 1;
+	      break;
+
+	    case 0x21: /* P.LS.U12 bits 100001 */
+	      if (b12s4_op (insn) == 0x9) /* SW 100001 1001 */
+		{
+		  breg = b0s5_reg (insn >> 16);
+		  sreg = b5s5_reg (insn >> 16);
+		  offset = b0s12_imm (insn);
+		  if (breg == NANOMIPS_SP_REGNUM) /* SW reg,offset($sp) */
+		    set_reg_offset (gdbarch, this_cache, sreg, sp + offset);
+		  else
+		    this_non_prologue_insn = 1;
+		}
+	      break;
+
+	    case 0x29: /* P.LS.S9 bits 101001 */
+	      if (b8s7_op (insn) == 0x48) /* SW[S9] 101001 1001 0 00 */
+		{
+		  breg = b0s5_reg (insn >> 16);
+		  sreg = b5s5_reg (insn >> 16);
+		  offset = (((insn >> 15) & 1) << 8) | b0s8_imm (insn);
+		  offset = (offset ^ 0x100) - 0x100;
+		  if (breg == NANOMIPS_SP_REGNUM) /* SW[S9] reg,offset($sp) */
+		    set_reg_offset (gdbarch, this_cache, sreg, sp + offset);
+		  else
+		    this_non_prologue_insn = 1;
+		}
+	      break;
+
+	    case 0x38: /* P.LUI bits 111000 */
+	      treg = b5s5_reg (insn >> 16);
+	      if ((insn & 2) == 0 /* LU20I bits 111000 0 */
+		  && treg == 3) /* LU20I $v1, imm */
+		{
+		  v1_off = ((insn & 1) << 19)
+			    | (((insn >> 2) & 0x3ff) << 9)
+			    | (((insn >> 12) & 0x1ff));
+		  v1_off = v1_off << 12;
+		}
+	      else
+		this_non_prologue_insn = 1;
+	      break;
+
+	   default:
+	     this_non_prologue_insn = 1;
+	     break;
+	   }
+
+	  insn >>= 16;
+	  break;
+
+	/* 16-bit instructions.  */
+	case INSN16_SIZE:
+	  switch (micromips_op (insn))
+	    {
+	    case 0x4: /* MOVE: bits 000100 */
+	      sreg = b0s5_reg (insn);
+	      dreg = b5s5_reg (insn);
+	      if (sreg == NANOMIPS_SP_REGNUM && dreg == NANOMIPS_FP_REGNUM)
+				/* MOVE  $fp, $sp */
+		frame_reg = NANOMIPS_FP_REGNUM;
+	      else
+		this_non_prologue_insn = 1;
+	      break;
+
+	    case 0x7: /* SAVE: bits 000111 */
+	      {
+		int rt, rt1, this_rt;
+		int counter = 0, count = b0s4_imm (insn);
+		long this_offset;
+		offset = b4s4_imm (insn) << 4;
+		rt1 = (insn >> 9) & 1;
+		rt = 30 | rt1;
+		sp_adj = -offset;
+		while (counter != count)
+		  {
+		    this_rt = (((rt >> 4) & 1) << 4) | (rt + counter);
+		    this_offset = (counter + 1) << 2;
+		    set_reg_offset (gdbarch, this_cache, this_rt,
+				    sp + offset - this_offset);
+		    counter++;
+		  }
+		break;
+	      }
+
+	    case 0x35: /* SW[SP]: bits 110101 */
+	      treg = b5s5_reg (insn);
+	      offset = b0s5_imm (insn);
+	      set_reg_offset (gdbarch, this_cache, treg, sp + offset);
+	      break;
+
+	    default:
+	      this_non_prologue_insn = 1;
+	      break;
+	    }
+	  break;
+	}
+
+      if (sp_adj < 0)
+	frame_offset -= sp_adj;
+
+      non_prologue_insns += this_non_prologue_insn;
+
+      if (non_prologue_insns > 1 || sp_adj > 0)
+  break;
+
+      prev_non_prologue_insn = this_non_prologue_insn;
+      prev_pc = cur_pc;
+    }
+
+  if (this_cache != NULL)
+    {
+      this_cache->base =
+	(get_frame_register_signed (this_frame,
+				    gdbarch_num_regs (gdbarch) + frame_reg)
+	 + frame_offset - frame_adjust);
+      /* FIXME: brobecker/2004-10-10: Just as in the mips32 case, we should
+	 be able to get rid of the assignment below, evetually. But it's
+	 still needed for now.  */
+      this_cache->saved_regs[gdbarch_num_regs (gdbarch) + NANOMIPS_PC_REGNUM]
+	= this_cache->saved_regs[gdbarch_num_regs (gdbarch)
+				 + NANOMIPS_RA_REGNUM];
+    }
+
+  /* Set end_prologue_addr to the address of the instruction immediately
+     after the last one we scanned.  Unless the last one looked like a
+     non-prologue instruction (and we looked ahead), in which case use
+     its address instead.  */
+  end_prologue_addr
+    = prev_non_prologue_insn ? prev_pc : cur_pc;
+
+  return end_prologue_addr;
+}
+
+/* Heuristic unwinder for procedures using nanoMIPS instructions.
+   Procedures that use the 32-bit instruction set are handled by the
+   mips_insn32 unwinder.  Likewise MIPS16 and the mips_insn16 unwinder. */
+
+static struct nanomips_frame_cache *
+nanomips_frame_cache (frame_info_ptr this_frame, void **this_cache)
+{
+  struct gdbarch *gdbarch = get_frame_arch (this_frame);
+  struct nanomips_frame_cache *cache;
+
+  if ((*this_cache) != NULL)
+    return (struct nanomips_frame_cache *) (*this_cache);
+
+  cache = FRAME_OBSTACK_ZALLOC (struct nanomips_frame_cache);
+  (*this_cache) = cache;
+  cache->saved_regs = trad_frame_alloc_saved_regs (this_frame);
+
+  /* Analyze the function prologue.  */
+  {
+    const CORE_ADDR pc = get_frame_address_in_block (this_frame);
+    CORE_ADDR start_addr;
+
+    find_pc_partial_function (pc, NULL, &start_addr, NULL);
+    if (start_addr == 0)
+      start_addr = heuristic_proc_start (get_frame_arch (this_frame), pc);
+    /* We can't analyze the prologue if we couldn't find the begining
+       of the function.  */
+    if (start_addr == 0)
+      return cache;
+
+    nanomips_scan_prologue (gdbarch, start_addr, pc, this_frame,
+			    (struct nanomips_frame_cache *) *this_cache);
+  }
+
+  /* gdbarch_sp_regnum contains the value and not the address.  */
+  cache->saved_regs[gdbarch_num_regs (gdbarch)
+        + NANOMIPS_SP_REGNUM].set_value (cache->base);
+
+  return (struct nanomips_frame_cache *) (*this_cache);
+}
+
+static void
+nanomips_frame_this_id (frame_info_ptr this_frame, void **this_cache,
+			struct frame_id *this_id)
+{
+  struct nanomips_frame_cache *info = nanomips_frame_cache (this_frame,
+							    this_cache);
+  /* This marks the outermost frame.  */
+  if (info->base == 0)
+    return;
+  (*this_id) = frame_id_build (info->base, get_frame_func (this_frame));
+}
+
+static struct value *
+nanomips_frame_prev_register (frame_info_ptr this_frame,
+			      void **this_cache, int regnum)
+{
+  struct nanomips_frame_cache *info = nanomips_frame_cache (this_frame,
+							    this_cache);
+  return trad_frame_get_prev_register (this_frame, info->saved_regs, regnum);
+}
+
+static int
+nanomips_frame_sniffer (const struct frame_unwind *self,
+			frame_info_ptr this_frame, void **this_cache)
+{
+  return 1;
+}
+
+static const struct frame_unwind nanomips_frame_unwind =
+{
+  "nanoMIPS insn prologue",
+  NORMAL_FRAME,
+  default_frame_unwind_stop_reason,
+  nanomips_frame_this_id,
+  nanomips_frame_prev_register,
+  NULL,
+  nanomips_frame_sniffer
+};
+
+static CORE_ADDR
+nanomips_frame_base_address (frame_info_ptr this_frame,
+			     void **this_cache)
+{
+  struct nanomips_frame_cache *info = nanomips_frame_cache (this_frame,
+							    this_cache);
+  return info->base;
+}
+
+static const struct frame_base nanomips_frame_base =
+{
+  &nanomips_frame_unwind,
+  nanomips_frame_base_address,
+  nanomips_frame_base_address,
+  nanomips_frame_base_address
+};
+
+static const struct frame_base *
+nanomips_frame_base_sniffer (frame_info_ptr this_frame)
+{
+  return &nanomips_frame_base;
+}
+
+/* nanomips_addr_bits_remove - remove useless address bits  */
+
+static CORE_ADDR
+nanomips_addr_bits_remove (struct gdbarch *gdbarch, CORE_ADDR addr)
+{
+  struct nanomips_gdbarch_tdep *tdep = gdbarch_tdep<nanomips_gdbarch_tdep> (gdbarch);
+
+  if (nanomips_mask_address_p (tdep)
+      && (((ULONGEST) addr) >> 32 == 0xffffffffUL))
+    /* This hack is a work-around for existing boards using PMON, the
+       simulator, and any other 64-bit targets that doesn't have true
+       64-bit addressing.  On these targets, the upper 32 bits of
+       addresses are ignored by the hardware.  Thus, the PC or SP are
+       likely to have been sign extended to all 1s by instruction
+       sequences that load 32-bit addresses.  For example, a typical
+       piece of code that loads an address is this:
+
+       lui $r2, <upper 16 bits>
+       ori $r2, <lower 16 bits>
+
+       But the lui sign-extends the value such that the upper 32 bits
+       may be all 1s.  The workaround is simply to mask off these
+       bits.  In the future, gcc may be changed to support true 64-bit
+       addressing, and this masking will have to be disabled.  */
+    return addr &= 0xffffffffUL;
+  else
+    return addr;
+}
+
+
+/* Checks for an atomic sequence of instructions beginning with a LL/LLD
+   instruction and ending with a SC/SCD instruction.  If such a sequence
+   is found, attempt to step through it.  A breakpoint is placed at the end of
+   the sequence.  */
+
+static std::vector<CORE_ADDR>
+nanomips_deal_with_atomic_sequence (struct gdbarch *gdbarch,
+				    CORE_ADDR pc)
+{
+  const int atomic_sequence_length = 16; /* Instruction sequence length.  */
+  int last_breakpoint = 0; /* Defaults to 0 (no breakpoints placed).  */
+  CORE_ADDR breaks[2] = {CORE_ADDR_MAX, CORE_ADDR_MAX};
+  CORE_ADDR branch_bp = 0; /* Breakpoint at branch instruction's
+			      destination.  */
+  CORE_ADDR loc = pc;
+  int sc_found = 0;
+  ULONGEST insn;
+  int insn_count;
+  int index;
+
+  /* Assume all atomic sequences start with a ll/lld instruction.  */
+  insn = nanomips_fetch_instruction (gdbarch, loc, NULL);
+  if (micromips_op (insn) != 0x29)	/* P.LL: bits 101001 */
+    return {};
+  loc += INSN16_SIZE;
+  insn <<= 16;
+  insn |= nanomips_fetch_instruction (gdbarch, loc, NULL);
+  if (b8s7_op (insn) != 0x51)	/* LL: bits 101001 1010 0 01 */
+    return {};
+  loc += INSN16_SIZE;
+
+  /* Assume all atomic sequences end with an sc/scd instruction.  Assume
+     that no atomic sequence is longer than "atomic_sequence_length"
+     instructions.  */
+  for (insn_count = 0;
+       !sc_found && insn_count < atomic_sequence_length;
+       ++insn_count)
+    {
+      int is_branch = 0, op;
+      CORE_ADDR offset;
+
+      insn = nanomips_fetch_instruction (gdbarch, loc, NULL);
+      loc += INSN16_SIZE;
+
+      /* Assume that there is at most one conditional branch in the
+         atomic sequence.  If a branch is found, put a breakpoint in
+         its destination address.  */
+      switch (nanomips_insn_size (insn))
+	{
+	/* 32-bit instructions.  */
+	case 2 * INSN16_SIZE:
+	  insn <<= 16;
+	  insn |= nanomips_fetch_instruction (gdbarch, loc, NULL);
+	  loc += INSN16_SIZE;
+
+	  switch (micromips_op (insn >> 16))
+	    {
+	    case 0xa: /* BALC, BC */
+	      offset = ((insn & 1) << 24 | ((insn >> 1) & 0xffffff)) << 1;
+	      offset = (offset ^ 0x2000000) - 0x2000000;
+	      branch_bp = loc + offset;
+	      is_branch = 1;
+	      break;
+
+	    case 0x12:
+	      op = b12s4_op (insn);
+	      if (op == 0x8) /* BALRC, BALRSC */
+		return {}; /* Fall back to the standard single-step code. */
+	      else if (op == 0 || op == 1) /* JALRC JALRC.HB */
+		return {}; /* Fall back to the standard single-step code. */
+	      break;
+
+	    case 0x20: /* PP.SR */
+	      if (b12s5_op (insn) == 0x13) /* RESTORE.JRC */
+		return {}; /* Fall back to the standard single-step code. */
+	      break;
+
+	    case 0x22: /* P.BR1 */
+	    case 0x2a: /* P.BR2 */
+	      op = b14s2_op (insn);
+	      offset = ((insn & 1) << 13 | ((insn >> 1) & 0x1fff)) << 1;
+	      offset = (offset ^ 0x4000) - 0x4000;
+	      if (op == 0 /* BEQC, BNEC */
+		  || op == 2 /* BGEC, BLTC */
+		  || op == 3) /* BGEUC, BLTUC */
+		{
+		  branch_bp = loc + offset;
+		  is_branch = 1;
+		}
+	      break;
+
+	    case 0x32: /* P.BRI */
+	      op = b2s3_cc (insn >> 16);
+	      offset = ((insn & 1) << 10 | ((insn >> 1) & 0x3ff)) << 1;
+	      offset = (offset ^ 0x800) - 0x800;
+	      if (op == 0 /* BEQIC */
+		  || op == 2 /* BGEIC */
+		  || op == 3 /* BGEIUC */
+		  || op == 4 /* BNEIC */
+		  || op == 6 /* BLTIC */
+		  || op == 7 ) /* BLTIUC */
+		{
+		  branch_bp = loc + offset;
+		  is_branch = 1;
+		}
+	      break;
+
+	    case 0x3a: /* P.BZ */
+	      op = (insn & 0x80000); /* 20th bit */
+	      offset = ((insn & 1) << 19 | ((insn >> 1) & 0x7ffff)) << 1;
+	      offset = (offset ^ 0x100000) - 0x100000;
+	      if (op == 0 /* BEQZC */
+	          || op != 0 ) /* BNEZC */
+		{
+		  branch_bp = loc + offset;
+		  is_branch = 1;
+		}
+	      break;
+
+	    case 0x29: /* P.SC: bits 101001 */
+	      if (b8s7_op (insn) == 0x59) /* SC: bits 101001 1011 0 01 */
+		sc_found = 1;
+	      break;
+	    }
+	  break;
+
+	/* 16-bit instructions.  */
+	case INSN16_SIZE:
+	  switch (micromips_op (insn))
+	    {
+	    case 0x6: /* BC[16] */
+	    case 0xe: /* BALC[16] */
+	      offset = ((insn & 1) << 9 | ((insn >> 1) & 0x1ff)) << 1;
+	      offset = (offset ^ 0x400) - 0x400;
+	      branch_bp = loc + offset;
+	      is_branch = 1;
+	      break;
+
+	    case 0x7: /* RESTORE.JRC[16] */
+	      if ((insn & 1) == 0 && (insn & 0x20) == 0x20)
+		return {}; /* Fall back to the standard single-step code. */
+	      break;
+
+	    case 0x26: /* BEQZC[16] */
+	    case 0x2e: /* BNEZC[16] */
+	      offset = ((insn & 1) << 6 | ((insn >> 1) & 0x3f)) << 1;
+	      offset = (offset ^ 0x80) - 0x80;
+	      branch_bp = loc + offset;
+	      is_branch = 1;
+	      break;
+
+	    case 0x36: /* P16.BR P16.JRC */
+	      offset = insn & 0xf;
+	      /* BEQC[16] BEQC[16] */
+	      if (offset != 0)
+		{
+		  branch_bp = loc + offset;
+		  is_branch = 1;
+		}
+	      else if (offset == 0) /* JALRC[16] JRC */
+		return {}; /* Fall back to the standard single-step code. */
+	      break;
+	    }
+	  break;
+	}
+
+      if (is_branch)
+	{
+	  if (last_breakpoint >= 1)
+	    return {}; /* More than one branch found, fallback to the
+			 standard single-step code.  */
+	  breaks[1] = branch_bp;
+	  last_breakpoint++;
+	}
+    }
+  if (!sc_found)
+    return {};
+
+  /* Insert a breakpoint right after the end of the atomic sequence.  */
+  breaks[0] = loc;
+
+  /* Check for duplicated breakpoints.  Check also for a breakpoint
+     placed (branch instruction's destination) in the atomic sequence */
+  if (last_breakpoint && pc <= breaks[1] && breaks[1] <= breaks[0])
+    last_breakpoint = 0;
+
+  std::vector<CORE_ADDR> next_pcs;
+
+  /* Effectively inserts the breakpoints.  */
+  for (index = 0; index <= last_breakpoint; index++)
+    next_pcs.push_back (breaks[index]);
+
+  return next_pcs;
+}
+
+/* nanomips_software_single_step() is called just before we want to resume
+   the inferior, if we want to single-step it but there is no hardware
+   or kernel single-step support (nanoMIPS on GNU/Linux for example).  We find
+   the target of the coming instruction and breakpoint it.  */
+
+std::vector<CORE_ADDR>
+nanomips_software_single_step (struct regcache *regcache)
+{
+  struct gdbarch *gdbarch = regcache->arch ();
+  CORE_ADDR pc, next_pc;
+
+  pc = regcache_read_pc (regcache);
+  std::vector<CORE_ADDR> next_pcs =
+			nanomips_deal_with_atomic_sequence (gdbarch, pc);
+
+  if (!next_pcs.empty ())
+    return next_pcs;
+
+  next_pc = nanomips_next_pc (regcache, pc);
+
+  return {next_pc};
+}
+
+/* This fencepost looks highly suspicious to me.  Removing it also
+   seems suspicious as it could affect remote debugging across serial
+   lines.  */
+
+static CORE_ADDR
+heuristic_proc_start (struct gdbarch *gdbarch, CORE_ADDR pc)
+{
+  CORE_ADDR start_pc;
+  CORE_ADDR fence;
+  int instlen;
+  struct inferior *inf;
+
+  pc = gdbarch_addr_bits_remove (gdbarch, pc);
+  start_pc = pc;
+  fence = start_pc - heuristic_fence_post;
+  if (start_pc == 0)
+    return 0;
+
+  if (heuristic_fence_post == -1 || fence < VM_MIN_ADDRESS)
+    fence = VM_MIN_ADDRESS;
+
+  instlen = INSN16_SIZE;
+
+  inf = current_inferior ();
+
+  /* Search back for previous return.  */
+  for (start_pc -= instlen;; start_pc -= instlen)
+    if (start_pc < fence)
+      {
+	/* It's not clear to me why we reach this point when
+	   stop_soon, but with this test, at least we
+	   don't print out warnings for every child forked (eg, on
+	   decstation).  22apr93 rich@cygnus.com.  */
+	if (inf->control.stop_soon == NO_STOP_QUIETLY)
+	  {
+	    static int blurb_printed = 0;
+
+	    warning (_("GDB can't find the start of the function at %s."),
+		     paddress (gdbarch, pc));
+
+	    if (!blurb_printed)
+	      {
+		/* This actually happens frequently in embedded
+		   development, when you first connect to a board
+		   and your stack pointer and pc are nowhere in
+		   particular.  This message needs to give people
+		   in that situation enough information to
+		   determine that it's no big deal.  */
+		gdb_printf ("\n\
+    GDB is unable to find the start of the function at %s\n\
+and thus can't determine the size of that function's stack frame.\n\
+This means that GDB may be unable to access that stack frame, or\n\
+the frames below it.\n\
+    This problem is most likely caused by an invalid program counter or\n\
+stack pointer.\n\
+    However, if you think GDB should simply search farther back\n\
+from %s for code which looks like the beginning of a\n\
+function, you can increase the range of the search using the `set\n\
+heuristic-fence-post' command.\n",
+			paddress (gdbarch, pc), paddress (gdbarch, pc));
+		blurb_printed = 1;
+	      }
+	  }
+
+	return 0;
+      }
+    else
+      {
+	ULONGEST insn;
+	int size;
+
+	/* On nanomips, SAVE is likely to be the start of a function.  */
+	insn = nanomips_fetch_instruction (gdbarch, pc, NULL);
+	size = nanomips_insn_size (insn);
+	if ((size == 2 && micromips_op (insn) == 0x7) ||
+	    (size == 4 && micromips_op (insn) == 0x20))
+	    break;
+      }
+
+  return start_pc;
+}
+
+/* On p32, argument passing in GPRs depends on the alignment of the type being
+   passed.  Return 1 if this type must be aligned to a doubleword boundary.  */
+
+static int
+type_needs_double_align (struct type *type)
+{
+  enum type_code typecode = type->code ();
+
+  if ((typecode == TYPE_CODE_FLT || typecode == TYPE_CODE_INT)
+      && type->length () == 8)
+    return 1;
+  else if (typecode == TYPE_CODE_STRUCT)
+    {
+      if (type->num_fields () > 1)
+	return 0;
+      return type_needs_double_align (type->field (0).type ());
+    }
+  else if (typecode == TYPE_CODE_UNION)
+    {
+      int i, n;
+
+      n = type->num_fields ();
+      for (i = 0; i < n; i++)
+	if (type_needs_double_align (type->field (i).type ()))
+	  return 1;
+      return 0;
+    }
+  return 0;
+}
+
+/* Adjust the address downward (direction of stack growth) so that it
+   is correctly aligned for a new stack frame.  */
+static CORE_ADDR
+nanomips_frame_align (struct gdbarch *gdbarch, CORE_ADDR addr)
+{
+  return align_down (addr, 16);
+}
+
+/* Implement the "push_dummy_code" gdbarch method.  */
+
+static CORE_ADDR
+nanomips_push_dummy_code (struct gdbarch *gdbarch, CORE_ADDR sp,
+			  CORE_ADDR funaddr, struct value **args,
+			  int nargs, struct type *value_type,
+			  CORE_ADDR *real_pc, CORE_ADDR *bp_addr,
+			  struct regcache *regcache)
+{
+  /* Reserve enough room on the stack for our breakpoint instruction.  */
+  sp = sp - 4;
+  *bp_addr = sp;
+
+  /* Inferior resumes at the function entry point.  */
+  *real_pc = funaddr;
+
+  return sp;
+}
+
+/* p32, p64 ABI stuff.  */
+
+#define MAX_REG_ARGS	8	/* Maximum 8 arguments in registers */
+
+static CORE_ADDR
+nanomips_push_dummy_call (struct gdbarch *gdbarch, struct value *function,
+			  struct regcache *regcache, CORE_ADDR bp_addr,
+			  int nargs, struct value **args, CORE_ADDR sp,
+			  function_call_return_method return_method, CORE_ADDR struct_addr)
+{
+  int arg_gpr = 0, arg_fpr = 0;
+  int argnum;
+  int stack_offset = 0, stack_size = 0;
+  int seen_on_stack = 0;
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  int regsize = nanomips_abi_regsize (gdbarch);
+
+  /* Set the return address register to point to the entry point of
+     the program, where a breakpoint lies in wait.  */
+  regcache_cooked_write_signed (regcache, NANOMIPS_RA_REGNUM, bp_addr);
+
+  /* First ensure that the stack and structure return address (if any)
+     are properly aligned.  The stack has to be at least 64-bit
+     aligned even on 32-bit machines, because doubles must be 64-bit
+     aligned.  */
+
+  sp = align_down (sp, 16);
+  struct_addr = align_down (struct_addr, 16);
+
+  /* Calculate space required on the stack for the args.  */
+  for (argnum = 0; argnum < nargs; argnum++)
+    {
+      struct type *arg_type = check_typedef (value_type (args[argnum]));
+
+      /* Align to double-word if necessary.  */
+      if (type_needs_double_align (arg_type))
+	stack_size = align_up (stack_size, NANOMIPS32_REGSIZE * 2);
+
+      /* Allocate space on the stack.  */
+      stack_size += align_up (arg_type->length(), NANOMIPS32_REGSIZE);
+    }
+  stack_size = align_up (stack_size, 16);
+
+  if (nanomips_debug)
+    gdb_printf (gdb_stdlog, "nanomips_push_dummy_call (stack_size=%d)\n", stack_size);
+
+  /* The struct_return pointer occupies the first parameter-passing reg.  */
+  if (return_method == return_method_struct)
+    {
+      if (nanomips_debug)
+	gdb_printf (gdb_stdlog,
+			    "  struct_return reg=%d %s\n",
+			    arg_gpr + NANOMIPS_A0_REGNUM,
+			    paddress (gdbarch, struct_addr));
+
+      regcache_cooked_write_unsigned (regcache, arg_gpr + NANOMIPS_A0_REGNUM,
+				      struct_addr);
+
+      /* occupy first argument reg */
+      arg_gpr++;
+    }
+
+  /* Now load as many as possible of the first arguments into
+     registers, and push the rest onto the stack.  Loop thru args
+     from first to last.  */
+  for (argnum = 0; argnum < nargs; argnum++)
+    {
+      const gdb_byte *val;
+      gdb_byte valbuf[NANOMIPS64_REGSIZE];
+      struct value *arg = args[argnum];
+      struct type *arg_type = check_typedef (value_type (arg));
+      int len = arg_type->length();
+      enum type_code typecode = arg_type->code ();
+
+      if (typecode == TYPE_CODE_STRUCT && arg_type->num_fields () == 1)
+      {
+          if ((arg_type->field (0).type ())->code () == TYPE_CODE_TYPEDEF)
+            {
+              struct type *type = check_typedef (arg_type->field (0).type ());
+              typecode = type->code ();
+              len = arg_type->length();
+            }
+          else if ((arg_type->field (0).type ())->code () == TYPE_CODE_FLT)
+            {
+              typecode = TYPE_CODE_FLT;
+            }
+      }
+
+      /* The P32 ABI passes structures larger than 8 bytes by reference. */
+      if ((typecode == TYPE_CODE_ARRAY || typecode == TYPE_CODE_STRUCT
+          || typecode == TYPE_CODE_UNION || typecode == TYPE_CODE_COMPLEX)
+          && len > regsize * 2)
+        {
+          store_unsigned_integer (valbuf, regsize, byte_order,
+                value_address (arg));
+          typecode = TYPE_CODE_PTR;
+          len = 4;
+          val = valbuf;
+
+          if (nanomips_debug)
+            gdb_printf (gdb_stdlog, " push");
+        }
+          else
+        val = value_contents (arg).data ();
+
+
+      while (len > 0)
+	{
+	  int partial_len = (len < NANOMIPS32_REGSIZE ? len : NANOMIPS32_REGSIZE);
+	  LONGEST regval;
+	  int use_stack = 0;
+
+	  /* Align the argument register for double and long long types.  */
+	  if ((arg_gpr < MAX_REG_ARGS) && (arg_gpr & 1) && (len == 8)
+        && ((typecode == TYPE_CODE_FLT
+        && FPU_TYPE(gdbarch) == NANOMIPS_FPU_SOFT)
+        || typecode == TYPE_CODE_INT))
+	    {
+	      arg_gpr++;
+	      stack_offset += 4;
+	    }
+
+    if (typecode == TYPE_CODE_STRUCT && (len <= 8 && len > 4) && arg_gpr == 7)
+      arg_gpr ++;
+
+	  /* double type occupies only one register.  */
+	  if (typecode == TYPE_CODE_FLT && len == 8)
+	    partial_len = (FPU_TYPE(gdbarch) == NANOMIPS_FPU_HARD ? 8 : 4);
+
+	  regval = extract_unsigned_integer (val, partial_len, byte_order);
+
+	  /* Check if any argument register is available.  */
+	  if (typecode == TYPE_CODE_FLT && FPU_TYPE(gdbarch) == NANOMIPS_FPU_HARD)
+	    {
+        if(arg_fpr < MAX_REG_ARGS)
+          {
+            if (nanomips_debug)
+              {
+                int r_num = arg_fpr + nanomips_fp_arg_regnum (gdbarch)
+                  + gdbarch_num_regs (gdbarch);
+                const char *r = nanomips_register_name (gdbarch, r_num);
+                gdb_printf (gdb_stdlog,
+                        "  argnum=%d,reg=%s,len=%d,val=%ld\n",
+                        argnum + 1, r, partial_len, regval);
+              }
+
+           /* Update the register with specified value.  */
+           regcache_cooked_write_unsigned (regcache,
+                    arg_fpr + nanomips_fp_arg_regnum (gdbarch),
+                    regval);
+            arg_fpr++;
+          }
+        else
+          use_stack = 1;
+	    }
+	  else
+	    {
+		    if (arg_gpr < MAX_REG_ARGS)
+          {
+            if (nanomips_debug)
+              {
+                int r_num = arg_gpr + NANOMIPS_A0_REGNUM
+                  + gdbarch_num_regs (gdbarch);
+                const char *r = nanomips_register_name (gdbarch, r_num);
+                gdb_printf (gdb_stdlog,
+                        "  argnum=%d,reg=%s,len=%d,val=%ld\n",
+                        argnum + 1, r, partial_len, regval);
+              }
+
+            /* Update the register with specified value.  */
+            regcache_cooked_write_unsigned (regcache,
+                     arg_gpr + NANOMIPS_A0_REGNUM, regval);
+            arg_gpr++;
+
+	        }
+	      else
+	        use_stack = 1;
+
+	    }
+
+	  if (use_stack)
+	    {
+	      CORE_ADDR addr;
+
+	      if (nanomips_debug)
+		{
+		  LONGEST valreg = extract_unsigned_integer (val, len,
+							     byte_order);
+		  gdb_printf (gdb_stdlog,
+				      "  argnum=%d,off=%d,len=%d,val=%ld\n",
+				      argnum + 1, stack_offset, partial_len,
+				      valreg);
+		}
+
+	      addr = (sp - stack_size) + stack_offset;
+	      write_memory (addr, val, partial_len);
+
+	      seen_on_stack = 1;
+	      stack_offset += (partial_len <= NANOMIPS32_REGSIZE)
+                            ? NANOMIPS32_REGSIZE : partial_len;
+	      use_stack = 0;
+	    } /* argument on stack */
+
+	  val += partial_len;
+	  len -= partial_len;
+	}
+    }
+
+  if (seen_on_stack)
+    sp -= stack_size;
+
+  regcache_cooked_write_signed (regcache, NANOMIPS_SP_REGNUM, sp);
+
+  /* Return adjusted stack pointer.  */
+  return sp;
+}
+
+static enum return_value_convention
+nanomips_return_value (struct gdbarch *gdbarch, struct value *function,
+           struct type *type, struct regcache *regcache,
+           gdb_byte *readbuf, const gdb_byte *writebuf)
+{
+  if ((type->code () == TYPE_CODE_ARRAY
+      || type->code () == TYPE_CODE_STRUCT
+      || type->code () == TYPE_CODE_COMPLEX)
+      && type->length () > 2 * NANOMIPS32_REGSIZE)
+    return RETURN_VALUE_STRUCT_CONVENTION;
+
+  else if (type->code () == TYPE_CODE_COMPLEX
+     && FPU_TYPE(gdbarch) == NANOMIPS_FPU_HARD)
+    {
+      gdb_assert (nanomips_regnum (gdbarch)->fpr != -1);
+
+      nanomips_xfer_register (gdbarch, regcache,
+			      (gdbarch_num_regs (gdbarch)
+			       + nanomips_regnum (gdbarch)->fpr
+			       + NANOMIPS_FP0_REGNUM),
+			      4, gdbarch_byte_order (gdbarch),
+			      readbuf, writebuf, 0);
+      nanomips_xfer_register (gdbarch, regcache,
+			      (gdbarch_num_regs (gdbarch)
+			       + nanomips_regnum (gdbarch)->fpr
+			       + NANOMIPS_FP0_REGNUM + 1),
+			      4, gdbarch_byte_order (gdbarch),
+			      readbuf, writebuf, 4);
+      return RETURN_VALUE_REGISTER_CONVENTION;
+    }
+  else if (type->code () == TYPE_CODE_FLT
+     && FPU_TYPE(gdbarch) == NANOMIPS_FPU_HARD)
+    {
+      gdb_assert (nanomips_regnum (gdbarch)->fpr != -1);
+
+      nanomips_xfer_register (gdbarch, regcache,
+			      (gdbarch_num_regs (gdbarch)
+			       + nanomips_regnum (gdbarch)->fpr
+			       + NANOMIPS_FP0_REGNUM),
+			      type->length (), gdbarch_byte_order (gdbarch),
+			      readbuf, writebuf, 0);
+      return RETURN_VALUE_REGISTER_CONVENTION;
+    }
+  else
+    {
+      int offset;
+      int regnum;
+      for (offset = 0, regnum = NANOMIPS_A0_REGNUM;
+     offset < type->length ();
+     offset += NANOMIPS32_REGSIZE, regnum++)
+  {
+    int xfer = NANOMIPS32_REGSIZE;
+    if (offset + xfer > type->length ())
+      xfer = type->length () - offset;
+    if (nanomips_debug)
+      gdb_printf (gdb_stderr, "Return scalar+%d:%d in $%d\n",
+        offset, xfer, regnum);
+    nanomips_xfer_register (gdbarch, regcache,
+            gdbarch_num_regs (gdbarch) + regnum, xfer,
+            gdbarch_byte_order (gdbarch),
+            readbuf, writebuf, offset);
+  }
+      return RETURN_VALUE_REGISTER_CONVENTION;
+    }
+}
+
+/* Copy a 32-bit single-precision value from the current frame
+   into rare_buffer.  */
+
+static void
+read_fp_register_single (frame_info_ptr frame, int regno,
+			 gdb_byte *rare_buffer)
+{
+  struct gdbarch *gdbarch = get_frame_arch (frame);
+  int raw_size = register_size (gdbarch, regno);
+  int offset;
+  gdb_byte *raw_buffer = (gdb_byte *) alloca (raw_size);
+
+  if (!deprecated_frame_register_read (frame, regno, raw_buffer))
+    error (_("can't read register %d (%s)"),
+	   regno, gdbarch_register_name (gdbarch, regno));
+
+  /* We have a 64-bit value for this register.  Find the low-order 32 bits.  */
+  if (gdbarch_byte_order (gdbarch) == BFD_ENDIAN_BIG)
+    offset = 4;
+  else
+    offset = 0;
+
+  memcpy (rare_buffer, raw_buffer + offset, 4);
+}
+
+/* Copy a 64-bit double-precision value from the current frame into
+   rare_buffer.  */
+
+static void
+read_fp_register_double (frame_info_ptr frame, int regno,
+			 gdb_byte *rare_buffer)
+{
+  struct gdbarch *gdbarch = get_frame_arch (frame);
+
+  /* We have a 64-bit value for this register, use all 64 bits.  */
+  if (!deprecated_frame_register_read (frame, regno, rare_buffer))
+      error (_("can't read register %d (%s)"),
+	     regno, gdbarch_register_name (gdbarch, regno));
+}
+
+static void
+print_fp_register (struct ui_file *file, frame_info_ptr frame,
+		   int regnum)
+{		/* Do values for FP (float) regs.  */
+  struct gdbarch *gdbarch = get_frame_arch (frame);
+  gdb_byte *raw_buffer;
+  std::string flt_str, dbl_str;
+  struct value_print_options opts;
+
+  const struct type *flt_type = builtin_type (gdbarch)->builtin_float;
+  const struct type *dbl_type = builtin_type (gdbarch)->builtin_double;
+
+  gdb_assert (nanomips_regnum (gdbarch)->fpr != -1);
+
+  raw_buffer
+    = ((gdb_byte *)
+       alloca (2 * register_size (gdbarch,
+				  (nanomips_regnum (gdbarch)->fpr
+				   + NANOMIPS_FP0_REGNUM))));
+
+  gdb_printf (file, "%s:", gdbarch_register_name (gdbarch, regnum));
+  gdb_printf (file, "%*s",
+		    4 - (int) strlen (gdbarch_register_name (gdbarch, regnum)),
+		    "");
+
+  /* Eight byte registers: print each one as hex, float and double.  */
+  read_fp_register_single (frame, regnum, raw_buffer);
+  flt_str = target_float_to_string (raw_buffer, flt_type, "%-17.9g");
+
+  read_fp_register_double (frame, regnum, raw_buffer);
+  dbl_str = target_float_to_string (raw_buffer, dbl_type, "%-24.17g");
+
+  get_formatted_print_options (&opts, 'x');
+  print_scalar_formatted (raw_buffer,
+			  builtin_type (gdbarch)->builtin_uint64,
+			  &opts, 'g', file);
+
+  gdb_printf (file, " flt: %s", flt_str.c_str ());
+
+  gdb_printf (file, " dbl: %s", dbl_str.c_str ());
+}
+
+static void
+nanomips_print_register (struct ui_file *file, frame_info_ptr frame,
+			 int regnum)
+{
+  struct gdbarch *gdbarch = get_frame_arch (frame);
+  struct value_print_options opts;
+  struct value *val;
+
+  if (nanomips_float_register_p (gdbarch, regnum))
+    {
+      print_fp_register (file, frame, regnum);
+      return;
+    }
+
+  val = get_frame_register_value (frame, regnum);
+
+  gdb_puts (gdbarch_register_name (gdbarch, regnum), file);
+
+  /* The problem with printing numeric register names (r26, etc.) is that
+     the user can't use them on input.  Probably the best solution is to
+     fix it so that either the numeric or the funky (a2, etc.) names
+     are accepted on input.  */
+  if (regnum < NUMREGS)
+    gdb_printf (file, "(r%d): ", regnum);
+  else
+    gdb_printf (file, ": ");
+
+  get_formatted_print_options (&opts, 'x');
+  value_print_scalar_formatted (val, &opts, 0, file);
+}
+
+/* Print IEEE exception condition bits in FLAGS.  */
+
+static void
+print_fpu_flags (struct ui_file *file, int flags)
+{
+  if (flags & (1 << 0))
+    gdb_puts (" inexact", file);
+  if (flags & (1 << 1))
+    gdb_puts (" uflow", file);
+  if (flags & (1 << 2))
+    gdb_puts (" oflow", file);
+  if (flags & (1 << 3))
+    gdb_puts (" div0", file);
+  if (flags & (1 << 4))
+    gdb_puts (" inval", file);
+  if (flags & (1 << 5))
+    gdb_puts (" unimp", file);
+  gdb_putc ('\n', file);
+}
+
+/* Print interesting information about the floating point processor
+   (if present) or emulator.  */
+
+static void
+nanomips_print_float_info (struct gdbarch *gdbarch, struct ui_file *file,
+			   frame_info_ptr frame, const char *args)
+{
+  int fcsr = nanomips_regnum (gdbarch)->fpr + NANOMIPS_FCSR_REGNUM;
+  enum fpu_type type = FPU_TYPE (gdbarch);
+  ULONGEST fcs = 0;
+  int i;
+
+  if (nanomips_regnum (gdbarch)->fpr == -1
+      || !read_frame_register_unsigned (frame, fcsr, &fcs))
+    type = NANOMIPS_FPU_NONE;
+
+  gdb_printf (file, "fpu type: %s\n",
+		    type == NANOMIPS_FPU_HARD ? "64bit hardware floating point"
+		    : type == NANOMIPS_FPU_SOFT ? "Software floating point"
+		    : "none / unused");
+
+  if (type == NANOMIPS_FPU_NONE)
+    return;
+
+  gdb_printf (file, "reg size: %d bits\n",
+		    register_size (gdbarch,
+				   (nanomips_regnum (gdbarch)->fpr
+				    + NANOMIPS_FP0_REGNUM)) * 8);
+
+  gdb_puts ("cond    :", file);
+  if (fcs & (1 << 23))
+    gdb_puts (" 0", file);
+  for (i = 1; i <= 7; i++)
+    if (fcs & (1 << (24 + i)))
+      gdb_printf (file, " %d", i);
+  gdb_putc ('\n', file);
+
+  gdb_puts ("cause   :", file);
+  print_fpu_flags (file, (fcs >> 12) & 0x3f);
+  fputs ("mask    :", stdout);
+  print_fpu_flags (file, (fcs >> 7) & 0x1f);
+  fputs ("flags   :", stdout);
+  print_fpu_flags (file, (fcs >> 2) & 0x1f);
+
+  gdb_puts ("rounding: ", file);
+  switch (fcs & 3)
+    {
+    case 0: gdb_puts ("nearest\n", file); break;
+    case 1: gdb_puts ("zero\n", file); break;
+    case 2: gdb_puts ("+inf\n", file); break;
+    case 3: gdb_puts ("-inf\n", file); break;
+    }
+
+  gdb_puts ("flush   :", file);
+  if (fcs & (1 << 21))
+    gdb_puts (" nearest", file);
+  if (fcs & (1 << 22))
+    gdb_puts (" override", file);
+  if (fcs & (1 << 24))
+    gdb_puts (" zero", file);
+  if ((fcs & (0xb << 21)) == 0)
+    gdb_puts (" no", file);
+  gdb_putc ('\n', file);
+
+  gdb_printf (file, "nan2008 : %s\n", fcs & (1 << 18) ? "yes" : "no");
+  gdb_printf (file, "abs2008 : %s\n", fcs & (1 << 19) ? "yes" : "no");
+  gdb_putc ('\n', file);
+
+  default_print_float_info (gdbarch, file, frame, args);
+}
+
+/* Replacement for generic do_registers_info.
+   Print regs in pretty columns.  */
+
+static int
+print_fp_register_row (struct ui_file *file, frame_info_ptr frame,
+		       int regnum)
+{
+  gdb_printf (file, " ");
+  print_fp_register (file, frame, regnum);
+  gdb_printf (file, "\n");
+  return regnum + 1;
+}
+
+
+/* Print a row's worth of GP (int) registers, with name labels above.  */
+
+static int
+print_gp_register_row (struct ui_file *file, frame_info_ptr frame,
+		       int start_regnum)
+{
+  struct gdbarch *gdbarch = get_frame_arch (frame);
+  /* Do values for GP (int) regs.  */
+  gdb_byte raw_buffer[NANOMIPS64_REGSIZE];
+  int ncols = (nanomips_abi_regsize (gdbarch) == 8 ? 4 : 8);    /* display cols
+							       per row.  */
+  int col, byte;
+  int regnum;
+
+  /* For GP registers, we print a separate row of names above the vals.  */
+  for (col = 0, regnum = start_regnum;
+       col < ncols && regnum < gdbarch_num_regs (gdbarch)
+			       + gdbarch_num_pseudo_regs (gdbarch);
+       regnum++)
+    {
+      if (*gdbarch_register_name (gdbarch, regnum) == '\0')
+	continue;		/* unused register */
+      if (nanomips_float_register_p (gdbarch, regnum))
+	break;			/* End the row: reached FP register.  */
+      /* Large registers are handled separately.  */
+      if (register_size (gdbarch, regnum) > nanomips_abi_regsize (gdbarch))
+	{
+	  if (col > 0)
+	    break;		/* End the row before this register.  */
+
+	  /* Print this register on a row by itself.  */
+	  nanomips_print_register (file, frame, regnum);
+	  gdb_printf (file, "\n");
+	  return regnum + 1;
+	}
+      if (col == 0)
+	gdb_printf (file, "     ");
+      gdb_printf (file,
+			nanomips_abi_regsize (gdbarch) == 8 ? "%17s" : "%9s",
+			gdbarch_register_name (gdbarch, regnum));
+      col++;
+    }
+
+  if (col == 0)
+    return regnum;
+
+  /* Print the R0 to R31 names.  */
+  if ((start_regnum % gdbarch_num_regs (gdbarch)) < NUMREGS)
+    gdb_printf (file, "\n R%-4d",
+		      start_regnum % gdbarch_num_regs (gdbarch));
+  else
+    gdb_printf (file, "\n      ");
+
+  /* Now print the values in hex, 4 or 8 to the row.  */
+  for (col = 0, regnum = start_regnum;
+       col < ncols && regnum < gdbarch_num_regs (gdbarch)
+			       + gdbarch_num_pseudo_regs (gdbarch);
+       regnum++)
+    {
+      if (*gdbarch_register_name (gdbarch, regnum) == '\0')
+	continue;		/* unused register */
+      if (nanomips_float_register_p (gdbarch, regnum))
+	break;			/* End row: reached FP register.  */
+      if (register_size (gdbarch, regnum) > nanomips_abi_regsize (gdbarch))
+	break;			/* End row: large register.  */
+
+      /* OK: get the data in raw format.  */
+      if (!deprecated_frame_register_read (frame, regnum, raw_buffer))
+	error (_("can't read register %d (%s)"),
+	       regnum, gdbarch_register_name (gdbarch, regnum));
+      /* pad small registers */
+      for (byte = 0;
+	   byte < (nanomips_abi_regsize (gdbarch)
+		   - register_size (gdbarch, regnum)); byte++)
+	gdb_printf ("  ");
+      /* Now print the register value in hex, endian order.  */
+      if (gdbarch_byte_order (gdbarch) == BFD_ENDIAN_BIG)
+	for (byte =
+	     register_size (gdbarch, regnum) - register_size (gdbarch, regnum);
+	     byte < register_size (gdbarch, regnum); byte++)
+	  gdb_printf (file, "%02x", raw_buffer[byte]);
+      else
+	for (byte = register_size (gdbarch, regnum) - 1;
+	     byte >= 0; byte--)
+	  gdb_printf (file, "%02x", raw_buffer[byte]);
+      gdb_printf (file, " ");
+      col++;
+    }
+  if (col > 0)			/* ie. if we actually printed anything...  */
+    gdb_printf (file, "\n");
+
+  return regnum;
+}
+
+/* MIPS_DO_REGISTERS_INFO(): called by "info register" command.  */
+
+static void
+nanomips_print_registers_info (struct gdbarch *gdbarch, struct ui_file *file,
+			       frame_info_ptr frame, int regnum, int all)
+{
+  if (regnum != -1)		/* Do one specified register.  */
+    {
+      gdb_assert (regnum >= gdbarch_num_regs (gdbarch));
+      if (*(gdbarch_register_name (gdbarch, regnum)) == '\0')
+	error (_("Not a valid register for the current processor type"));
+
+      nanomips_print_register (file, frame, regnum);
+      gdb_printf (file, "\n");
+    }
+  else
+    /* Do all (or most) registers.  */
+    {
+      regnum = gdbarch_num_regs (gdbarch);
+      while (regnum < gdbarch_num_regs (gdbarch)
+		      + gdbarch_num_pseudo_regs (gdbarch))
+	{
+	  if (nanomips_float_register_p (gdbarch, regnum))
+	    {
+	      if (all)		/* True for "INFO ALL-REGISTERS" command.  */
+		regnum = print_fp_register_row (file, frame, regnum);
+	      else
+		regnum += NUMREGS;	/* Skip floating point regs.  */
+	    }
+	  else
+	    regnum = print_gp_register_row (file, frame, regnum);
+	}
+    }
+}
+
+/* To skip prologues, I use this predicate.  Returns either PC itself
+   if the code at PC does not look like a function prologue; otherwise
+   returns an address that (if we're lucky) follows the prologue.  If
+   LENIENT, then we must skip everything which is involved in setting
+   up the frame (it's OK to skip more, just so long as we don't skip
+   anything which might clobber the registers which are being saved.
+   We must skip more in the case where part of the prologue is in the
+   delay slot of a non-prologue instruction).  */
+
+static CORE_ADDR
+nanomips_skip_prologue (struct gdbarch *gdbarch, CORE_ADDR pc)
+{
+  CORE_ADDR limit_pc;
+  CORE_ADDR func_addr;
+
+  /* See if we can determine the end of the prologue via the symbol table.
+     If so, then return either PC, or the PC after the prologue, whichever
+     is greater.  */
+  if (find_pc_partial_function (pc, NULL, &func_addr, NULL))
+    {
+      CORE_ADDR post_prologue_pc
+	= skip_prologue_using_sal (gdbarch, func_addr);
+      if (post_prologue_pc != 0)
+	return std::max (pc, post_prologue_pc);
+    }
+
+  /* Can't determine prologue from the symbol table, need to examine
+     instructions.  */
+
+  /* Find an upper limit on the function prologue using the debug
+     information.  If the debug information could not be used to provide
+     that bound, then use an arbitrary large number as the upper bound.  */
+  limit_pc = skip_prologue_using_sal (gdbarch, pc);
+  if (limit_pc == 0)
+    limit_pc = pc + 100;          /* Magic.  */
+
+  return nanomips_scan_prologue (gdbarch, pc, limit_pc, NULL, NULL);
+}
+
+/* Implement the stack_frame_destroyed_p gdbarch method (nanoMIPS version).
+   This is a helper function for mips_stack_frame_destroyed_p.  */
+
+static int
+nanomips_stack_frame_destroyed_p (struct gdbarch *gdbarch, CORE_ADDR pc)
+{
+  CORE_ADDR func_addr = 0;
+  CORE_ADDR func_end = 0;
+  CORE_ADDR addr;
+  ULONGEST insn;
+  int dreg;
+  int sreg;
+  int treg, op;
+  int loc;
+
+  if (!find_pc_partial_function (pc, NULL, &func_addr, &func_end))
+    return 0;
+
+  /* The nanoMIPS epilogue is max. 12 bytes long.  */
+  addr = func_end - 12;
+
+  if (addr < func_addr + 2)
+    addr = func_addr + 2;
+  if (pc < addr)
+    return 0;
+
+  for (; pc < func_end; pc += loc)
+    {
+      loc = 0;
+      insn = nanomips_fetch_instruction (gdbarch, pc, NULL);
+      loc += INSN16_SIZE;
+      switch (nanomips_insn_size (insn))
+	{
+	/* 48-bit instructions.  */
+	case 3 * INSN16_SIZE:
+	  if (micromips_op (insn) == 0x18)
+	    {
+	      op = b0s5_imm (insn);
+	      treg = b5s5_reg (insn);
+	      if (op == 0x0) /* LI48 xx, imm32 */
+		break; /* continue scan */
+	      else if (op == 0x1 /* ADDIU48 $sp, imm32 */
+		       && treg == NANOMIPS_SP_REGNUM)
+		return 1;
+	    }
+	  return 0;
+
+	/* 32-bit instructions.  */
+	case 2 * INSN16_SIZE:
+	  insn <<= 16;
+	  insn |= nanomips_fetch_instruction (gdbarch, pc + loc, NULL);
+	  loc += INSN16_SIZE;
+
+	  switch (micromips_op (insn >> 16))
+	    {
+	    case 0x0: /* PP.ADDIU bits 000000 */
+	      treg = b5s5_reg (insn >> 16);
+	      sreg = b0s5_reg (insn >> 16);
+	      if (sreg == treg
+		  && treg == NANOMIPS_SP_REGNUM) /* ADDIU $sp, $sp, imm */
+		return 1;
+	      else if (sreg == NANOMIPS_SP_REGNUM && treg == 30)
+		break; /* continue scan */
+	      return 0;
+
+	    case 0x8: /* _POOL32A0 */
+	      if ((insn & 0x1ff) == 0x150) /* ADDU */
+		{
+		  dreg = b11s5_reg (insn);
+		  sreg = b0s5_reg (insn >> 16);
+		  if ((dreg == sreg && sreg == NANOMIPS_SP_REGNUM)
+		      /* ADDU $sp, $sp, xx */
+		      || (dreg == NANOMIPS_SP_REGNUM && sreg == 30))
+		      /* ADDU $sp, $fp, xx */
+		    break; /* continue scan */
+		}
+	      else if (((insn & 0xffff) == 0xE37F) /* DERET */
+		       || ((insn & 0x1ffff) == 0xF37F) /* ERET */
+		       || ((insn & 0x1ffff) == 0x1F37F)) /* ERETNC */
+		return 1;
+	      return 0;
+
+	    case 0x20: /* P.U12 bits 100000 */
+	      if (b12s4_op (insn) == 0) /* ORI: bits 100000 0000 */
+		{
+		  sreg = b0s5_reg (insn >> 16);
+		  treg = b5s5_reg (insn >> 16);
+		  if (sreg == treg && treg == 3) /* ORI $v1, $v1, imm */
+		    break; /* continue scan */
+		}
+	      else if (b12s5_op (insn) == 0x13) /* RESTORE, RESTORE.JRC */
+		return 1;
+	      return 0;
+
+	    case 0x38: /* P.LUI bits 111000 */
+	      treg = b5s5_reg (insn >> 16);
+	      if ((insn & 2) == 0 /* LU20I bits 111000 0 */
+		  && treg == 3) /* LU20I $v1, imm */
+		break; /* continue scan */
+	      return 0;
+
+	    default:
+	      return 0;
+	    }
+	  break;
+
+	/* 16-bit instructions.  */
+	case INSN16_SIZE:
+	  switch (micromips_op (insn))
+	    {
+	    case 0x4: /* MOVE: bits 000100 */
+	      sreg = b0s5_reg (insn);
+	      dreg = b5s5_reg (insn);
+	      if (sreg == NANOMIPS_SP_REGNUM && dreg == 30)
+			/* MOVE  $fp, $sp */
+		return 1;
+	      return 0;
+
+	    case 0x7: /* RESTORE[16], RESTORE.JRC[16] */
+	      if ((insn & 0x20) == 0x20)
+		return 1;
+	      return 0;
+
+	    case 0x36: /* JRC[16] $31 */
+	      if ((insn & 0x1f) == 0 && b5s5_reg (insn) == 31)
+		return 1;
+	      return 0;
+
+	    default:
+		return 0;
+	    }
+	  break;
+	}
+    }
+
+  return 1;
+}
+
+/* Root of all "set nanomips "/"show nanomips " commands.  This will eventually be
+   used for all nanoMIPS-specific commands.  */
+
+static void
+show_nanomips_command (const char *args, int from_tty)
+{
+  help_list (shownanomipscmdlist, "show nanomips ", all_commands, gdb_stdout);
+}
+
+static void
+set_nanomips_command (const char *args, int from_tty)
+{
+  printf_unfiltered
+    ("\"set nanomips\" must be followed by an appropriate subcommand.\n");
+  help_list (setnanomipscmdlist, "set nanomips ", all_commands, gdb_stdout);
+}
+
+/* Just like reinit_frame_cache, but with the right arguments to be
+   callable as an sfunc.  */
+
+static void
+reinit_frame_cache_sfunc (const char *args, int from_tty,
+			  struct cmd_list_element *c)
+{
+  reinit_frame_cache ();
+}
+
+static int
+gdb_print_insn_nanomips_p32 (bfd_vma memaddr, struct disassemble_info *info)
+{
+  info->mach = bfd_mach_nanomipsisa32r6;
+  info->flavour = bfd_target_elf_flavour;
+  info->disassembler_options = "gpr-names=p32";
+
+  return print_insn_nanomips (memaddr, info);
+}
+
+static int
+gdb_print_insn_nanomips_p64 (bfd_vma memaddr, struct disassemble_info *info)
+{
+  info->mach = bfd_mach_nanomipsisa64r6;
+  info->flavour = bfd_target_elf_flavour;
+  info->disassembler_options = "gpr-names=p64";
+
+  return print_insn_nanomips (memaddr, info);
+}
+
+/* Implement the breakpoint_kind_from_pc gdbarch method.  */
+
+static int
+nanomips_breakpoint_kind_from_pc (struct gdbarch *gdbarch, CORE_ADDR *pcptr)
+{
+  CORE_ADDR pc = *pcptr;
+  ULONGEST insn;
+  int status;
+
+  insn = nanomips_fetch_instruction (gdbarch, pc, &status);
+  if (status || (nanomips_insn_size (insn) == 2))
+    return NANOMIPS_BP_KIND_16;
+  else
+    return NANOMIPS_BP_KIND_32;
+}
+
+/* Implement the sw_breakpoint_from_kind gdbarch method.  */
+
+static const gdb_byte *
+nanomips_sw_breakpoint_from_kind (struct gdbarch *gdbarch, int kind, int *size)
+{
+  enum bfd_endian byte_order_for_code = gdbarch_byte_order_for_code (gdbarch);
+
+  switch (kind)
+    {
+    case NANOMIPS_BP_KIND_16:
+      {
+	static gdb_byte be16_break[] = { 0x10, 0x10 };
+	static gdb_byte le16_break[] = { 0x10, 0x10 };
+
+	*size = 2;
+
+	if (byte_order_for_code == BFD_ENDIAN_BIG)
+	  return be16_break;
+	else
+	  return le16_break;
+      }
+    case NANOMIPS_BP_KIND_32:
+      {
+	static gdb_byte be32_break[] = { 0, 0x10, 0, 0 };
+	static gdb_byte le32_break[] = { 0x10, 0, 0, 0 };
+
+	*size = 4;
+	if (byte_order_for_code == BFD_ENDIAN_BIG)
+	  return be32_break;
+	else
+	  return le32_break;
+      }
+    default:
+      gdb_assert_not_reached ("unexpected nanomips breakpoint kind");
+    };
+}
+
+/* Convert a dbx stab register number (from `r' declaration) to a GDB
+   [1 * gdbarch_num_regs .. 2 * gdbarch_num_regs) REGNUM.  */
+
+static int
+nanomips_stab_reg_to_regnum (struct gdbarch *gdbarch, int num)
+{
+  int regnum;
+  if (num >= 0 && num < 32)
+    regnum = num;
+  else if (nanomips_regnum (gdbarch)->fpr != -1 && num >= 36 && num < 70)
+    regnum = num + nanomips_regnum (gdbarch)->fpr + NANOMIPS_FP0_REGNUM - 36;
+  else if (nanomips_regnum (gdbarch)->dsp != -1 && num >= 70 && num < 78)
+    regnum
+      = num + nanomips_regnum (gdbarch)->dsp + NANOMIPS_DSPHI0_REGNUM - 70;
+  else
+    return -1;
+  return gdbarch_num_regs (gdbarch) + regnum;
+}
+
+
+/* Convert a dwarf, dwarf2, or ecoff register number to a GDB [1 *
+   gdbarch_num_regs .. 2 * gdbarch_num_regs) REGNUM.  */
+
+static int
+nanomips_dwarf_dwarf2_ecoff_reg_to_regnum (struct gdbarch *gdbarch, int num)
+{
+  int regnum;
+  if (num >= 0 && num < 32)
+    regnum = num;
+  else if (nanomips_regnum (gdbarch)->fpr != -1 && num >= 32 && num < 64)
+    regnum = num + nanomips_regnum (gdbarch)->fpr + NANOMIPS_FP0_REGNUM - 32;
+  else if (nanomips_regnum (gdbarch)->dsp != -1 && num >= 64 && num < 72)
+    regnum
+      = num + nanomips_regnum (gdbarch)->dsp + NANOMIPS_DSPHI0_REGNUM - 64;
+  else
+    return -1;
+  return gdbarch_num_regs (gdbarch) + regnum;
+}
+
+static int
+nanomips_register_sim_regno (struct gdbarch *gdbarch, int regnum)
+{
+  /* Only makes sense to supply raw registers.  */
+  gdb_assert (regnum >= 0 && regnum < gdbarch_num_regs (gdbarch));
+  /* FIXME: cagney/2002-05-13: Need to look at the pseudo register to
+     decide if it is valid.  Should instead define a standard sim/gdb
+     register numbering scheme.  */
+  if (gdbarch_register_name (gdbarch,
+			     gdbarch_num_regs (gdbarch) + regnum) != NULL
+      && gdbarch_register_name (gdbarch,
+			        gdbarch_num_regs (gdbarch)
+				+ regnum)[0] != '\0')
+    return regnum;
+  else
+    return LEGACY_SIM_REGNO_IGNORE;
+}
+
+
+/* Convert an integer into an address.  Extracting the value signed
+   guarantees a correctly sign extended address.  */
+
+static CORE_ADDR
+nanomips_integer_to_address (struct gdbarch *gdbarch,
+			     struct type *type, const gdb_byte *buf)
+{
+  enum bfd_endian byte_order = gdbarch_byte_order (gdbarch);
+  return extract_signed_integer (buf, type->length (), byte_order);
+}
+
+/* Dummy virtual frame pointer method.  This is no more or less accurate
+   than most other architectures; we just need to be explicit about it,
+   because the pseudo-register gdbarch_sp_regnum will otherwise lead to
+   an assertion failure.  */
+
+static void
+nanomips_virtual_frame_pointer (struct gdbarch *gdbarch,
+				CORE_ADDR pc, int *reg, LONGEST *offset)
+{
+  *reg = NANOMIPS_SP_REGNUM;
+  *offset = 0;
+}
+
+static struct gdbarch *
+nanomips_gdbarch_init (struct gdbarch_info info, struct gdbarch_list *arches)
+{
+  static const char *const mips_gprs[] = {
+    "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
+    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+    "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23",
+    "r24", "r25", "r26", "r27", "r28", "r29", "r30", "r31"
+  };
+  static const char *const mips_fprs[] = {
+    "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7",
+    "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15",
+    "f16", "f17", "f18", "f19", "f20", "f21", "f22", "f23",
+    "f24", "f25", "f26", "f27", "f28", "f29", "f30", "f31"
+  };
+  static const char *const mips_dsprs[] = {
+    "hi0", "lo0", "hi1", "lo1", "hi2", "lo2", "hi3", "lo3"
+  };
+  const struct tdesc_feature *feature;
+  struct gdbarch *gdbarch;
+  struct nanomips_gdbarch_tdep *tdep;
+  int elf_flags;
+  enum nanomips_abi nanomips_abi, found_abi;
+  int i, num_regs;
+  enum fpu_type fpu_type;
+  tdesc_arch_data_up tdesc_data;
+  const struct target_desc *tdesc = info.target_desc;
+  int elf_fpu_type = Val_GNU_NANOMIPS_ABI_FP_ANY;
+  struct nanomips_regnum nanomips_regnum, *regnum;
+  int register_size;
+  int valid_p;
+
+  num_regs = 0;
+
+  nanomips_regnum.cause = -1;
+  nanomips_regnum.status = -1;
+  nanomips_regnum.badvaddr = -1;
+  nanomips_regnum.fpr = -1;
+  nanomips_regnum.dsp = -1;
+  nanomips_regnum.restart = -1;
+
+  /* If there's no target description, then use the default.  */
+  if (!tdesc_has_registers (tdesc))
+    tdesc = tdesc_nanomips;
+
+  /* The CPU feature and the registers within are mandatory.  */
+  feature = tdesc_find_feature (tdesc, "org.gnu.gdb.nanomips.cpu");
+  if (feature == NULL)
+    return NULL;
+
+  tdesc_data = tdesc_data_alloc ();
+
+  valid_p = 1;
+  for (i = 0; i < 32; i++, num_regs++)
+    valid_p &= tdesc_numbered_register (feature, tdesc_data.get (), num_regs,
+					mips_gprs[i]);
+  valid_p &= tdesc_numbered_register (feature, tdesc_data.get (), num_regs++, "pc");
+  if (!valid_p)
+      return NULL;
+  register_size = tdesc_register_bitsize (feature, "r0") / 8;
+
+  /* All the remaining target description features are optional.  */
+
+  /* Check for and assign a number to the syscall restart PC register.  */
+  feature = tdesc_find_feature (tdesc, "org.gnu.gdb.nanomips.linux");
+  if (feature != NULL)
+    {
+      if (tdesc_numbered_register (feature, tdesc_data.get (), num_regs, "restart"))
+	nanomips_regnum.restart = num_regs++;
+
+      /* Check for and assign numbers to particular CP0 registers.
+	 These are only special and need known numbers with Linux
+	 targets, due to the use in signal frames, etc.  Bare metal
+	 stubs can simply include them along with other CP0 registers.  */
+      feature = tdesc_find_feature (tdesc, "org.gnu.gdb.nanomips.cp0");
+      if (feature != NULL)
+	{
+	  if (tdesc_numbered_register (feature, tdesc_data.get (), num_regs,
+				       "badvaddr"))
+	    nanomips_regnum.badvaddr = num_regs++;
+	  if (tdesc_numbered_register (feature, tdesc_data.get (), num_regs,
+				       "status"))
+	    nanomips_regnum.status = num_regs++;
+	  if (tdesc_numbered_register (feature, tdesc_data.get (), num_regs,
+				       "cause"))
+	    nanomips_regnum.cause = num_regs++;
+	}
+    }
+
+  /* Check for and assign numbers to FPU registers.  */
+  feature = tdesc_find_feature (tdesc, "org.gnu.gdb.nanomips.fpu");
+  if (feature != NULL)
+    {
+      nanomips_regnum.fpr = num_regs;
+      for (i = 0; i < 32; i++, num_regs++)
+	valid_p &= tdesc_numbered_register (feature, tdesc_data.get (), num_regs,
+					    mips_fprs[i]);
+      valid_p &= tdesc_numbered_register (feature, tdesc_data.get (), num_regs++,
+					  "fcsr");
+      valid_p &= tdesc_numbered_register (feature, tdesc_data.get (), num_regs++,
+					  "fir");
+      if (!valid_p)
+      return NULL;
+    }
+
+  /* Check for and assign numbers to DSP registers.  */
+  feature = tdesc_find_feature (tdesc, "org.gnu.gdb.nanomips.dsp");
+  if (feature != NULL)
+    {
+      nanomips_regnum.dsp = num_regs;
+      for (i = 0; i < 8; i++, num_regs++)
+	valid_p &= tdesc_numbered_register (feature, tdesc_data.get (), num_regs,
+					    mips_dsprs[i]);
+      valid_p &= tdesc_numbered_register (feature, tdesc_data.get (), num_regs++,
+					  "dspctl");
+      if (!valid_p)
+        return NULL;
+    }
+
+  /* First of all, extract the elf_flags, if available.  */
+  if (info.abfd && bfd_get_flavour (info.abfd) == bfd_target_elf_flavour)
+    elf_flags = elf_elfheader (info.abfd)->e_flags;
+  else if (arches != NULL)
+    elf_flags = (gdbarch_tdep<nanomips_gdbarch_tdep> (arches->gdbarch))->elf_flags;
+  else
+    elf_flags = 0;
+
+  if (gdbarch_debug)
+    gdb_printf (gdb_stdlog,
+			"nanomips_gdbarch_init: elf_flags = 0x%08x\n",
+			elf_flags);
+
+  /* Check ELF_FLAGS to see if it specifies the ABI being used.  */
+  switch ((elf_flags & EF_NANOMIPS_ABI))
+    {
+    case E_NANOMIPS_ABI_P32:
+      found_abi = NANOMIPS_ABI_P32;
+      break;
+    case E_NANOMIPS_ABI_P64:
+      found_abi = NANOMIPS_ABI_P64;
+      break;
+    default:
+      found_abi = NANOMIPS_ABI_UNKNOWN;
+      break;
+    }
+
+  /* If we have no useful BFD information, use the ABI from the last
+     nanoMIPS architecture (if there is one).  */
+  if (found_abi == NANOMIPS_ABI_UNKNOWN && info.abfd == NULL && arches != NULL)
+    found_abi = (gdbarch_tdep<nanomips_gdbarch_tdep> (arches->gdbarch))->found_abi;
+
+  /* Try the architecture for any hint of the correct ABI.  */
+  if (found_abi == NANOMIPS_ABI_UNKNOWN
+      && info.bfd_arch_info != NULL
+      && info.bfd_arch_info->arch == bfd_arch_nanomips)
+    {
+      switch (info.bfd_arch_info->mach)
+	{
+	case bfd_mach_nanomipsisa32r6:
+	  found_abi = NANOMIPS_ABI_P32;
+	  break;
+	case bfd_mach_nanomipsisa64r6:
+	  found_abi = NANOMIPS_ABI_P64;
+	  break;
+	}
+    }
+
+  /* Default 64-bit objects to P64 instead of P32.  */
+  if (found_abi == NANOMIPS_ABI_UNKNOWN
+      && info.abfd != NULL
+      && bfd_get_flavour (info.abfd) == bfd_target_elf_flavour
+      && elf_elfheader (info.abfd)->e_ident[EI_CLASS] == ELFCLASS64)
+    found_abi = NANOMIPS_ABI_P64;
+
+  if (gdbarch_debug)
+    gdb_printf (gdb_stdlog, "nanomips_gdbarch_init: found_abi = %d\n",
+			found_abi);
+
+  /* Now that we have found what the ABI for this binary would be,
+     check whether the user is overriding it.  */
+  if (found_abi != NANOMIPS_ABI_UNKNOWN)
+    nanomips_abi = found_abi;
+  else
+    nanomips_abi = NANOMIPS_ABI_P32;
+  if (gdbarch_debug)
+    gdb_printf (gdb_stdlog,
+			"nanomips_gdbarch_init: nanomips_abi = %d\n",
+			nanomips_abi);
+
+  /* Determine the nanoMIPS FPU type.  */
+  if (info.abfd
+      && bfd_get_flavour (info.abfd) == bfd_target_elf_flavour)
+    {
+      Elf_Internal_ABIFlags_v0 *abiflags;
+      abiflags = bfd_nanomips_elf_get_abiflags (info.abfd);
+      if (abiflags != NULL)
+	elf_fpu_type = abiflags->fp_abi;
+    }
+
+  if (elf_fpu_type != Val_GNU_NANOMIPS_ABI_FP_ANY)
+    {
+      switch (elf_fpu_type)
+	{
+	case Val_GNU_NANOMIPS_ABI_FP_SOFT:
+	  fpu_type = NANOMIPS_FPU_SOFT;
+	  break;
+	default:
+	  fpu_type = NANOMIPS_FPU_HARD;
+	  break;
+	}
+    }
+  else if (arches != NULL)
+    fpu_type = (gdbarch_tdep<nanomips_gdbarch_tdep> (arches->gdbarch))->fpu_type;
+  else
+    fpu_type = NANOMIPS_FPU_HARD;
+
+  if (gdbarch_debug)
+    gdb_printf (gdb_stdlog,
+			"nanomips_gdbarch_init: fpu_type = %d\n", fpu_type);
+
+  /* Check for blatant incompatibilities.  */
+
+  /* If we have only 32-bit registers, then we can't debug a 64-bit ABI.  */
+  if (register_size == 4 && nanomips_abi != NANOMIPS_ABI_P32)
+    {
+      return NULL;
+    }
+
+  /* Try to find a pre-existing architecture.  */
+  for (arches = gdbarch_list_lookup_by_info (arches, &info);
+       arches != NULL;
+       arches = gdbarch_list_lookup_by_info (arches->next, &info))
+    {
+      /* nanoMIPS needs to be pedantic about which ABI and the compressed
+         ISA variation the object is using.  */
+      if (gdbarch_tdep<nanomips_gdbarch_tdep> (arches->gdbarch)->elf_flags != elf_flags)
+	continue;
+      if (gdbarch_tdep<nanomips_gdbarch_tdep> (arches->gdbarch)->nanomips_abi != nanomips_abi)
+	continue;
+      /* Be pedantic about which FPU is selected.  */
+      if (gdbarch_tdep<nanomips_gdbarch_tdep> (arches->gdbarch)->fpu_type != fpu_type)
+	continue;
+
+      return arches->gdbarch;
+    }
+
+  /* Need a new architecture.  Fill in a target specific vector.  */
+  tdep = new (struct nanomips_gdbarch_tdep);
+  gdbarch = gdbarch_alloc (&info, tdep);
+  tdep->elf_flags = elf_flags;
+  tdep->found_abi = found_abi;
+  tdep->nanomips_abi = nanomips_abi;
+  tdep->fpu_type = fpu_type;
+  tdep->register_size = register_size;
+
+  /* Initially set everything according to the default ABI/ISA.  */
+  set_gdbarch_short_bit (gdbarch, 16);
+  set_gdbarch_int_bit (gdbarch, 32);
+  set_gdbarch_float_bit (gdbarch, 32);
+  set_gdbarch_double_bit (gdbarch, 64);
+  set_gdbarch_long_double_bit (gdbarch, 64);
+  set_gdbarch_register_reggroup_p (gdbarch, nanomips_register_reggroup_p);
+  set_gdbarch_pseudo_register_read (gdbarch, nanomips_pseudo_register_read);
+  set_gdbarch_pseudo_register_write (gdbarch, nanomips_pseudo_register_write);
+  set_gdbarch_ax_pseudo_register_collect (gdbarch,
+					  nanomips_ax_pseudo_register_collect);
+  set_gdbarch_ax_pseudo_register_push_stack
+      (gdbarch, nanomips_ax_pseudo_register_push_stack);
+
+  tdep->default_mask_address_p = 0;
+
+  set_gdbarch_push_dummy_call (gdbarch, nanomips_push_dummy_call);
+  set_gdbarch_return_value (gdbarch, nanomips_return_value);
+
+  switch (nanomips_abi)
+    {
+    case NANOMIPS_ABI_P32:
+      set_gdbarch_long_bit (gdbarch, 32);
+      set_gdbarch_ptr_bit (gdbarch, 32);
+      set_gdbarch_long_long_bit (gdbarch, 64);
+      break;
+    case NANOMIPS_ABI_P64:
+      set_gdbarch_long_bit (gdbarch, 64);
+      set_gdbarch_ptr_bit (gdbarch, 64);
+      set_gdbarch_long_long_bit (gdbarch, 64);
+      set_gdbarch_long_double_bit (gdbarch, 128);
+      set_gdbarch_long_double_format (gdbarch, floatformats_ibm_long_double);
+      break;
+    default:
+      internal_error_loc (__FILE__, __LINE__, _("unknown ABI in switch"));
+    }
+
+  set_gdbarch_read_pc (gdbarch, nanomips_read_pc);
+  set_gdbarch_write_pc (gdbarch, nanomips_write_pc);
+
+  /* Add/remove bits from an address.  The nanoMIPS needs be careful to
+     ensure that all 32 bit addresses are sign extended to 64 bits.  */
+  set_gdbarch_addr_bits_remove (gdbarch, nanomips_addr_bits_remove);
+
+  /* Unwind the frame.  */
+  set_gdbarch_unwind_pc (gdbarch, nanomips_unwind_pc);
+  set_gdbarch_unwind_sp (gdbarch, nanomips_unwind_sp);
+  set_gdbarch_dummy_id (gdbarch, nanomips_dummy_id);
+
+  /* Map debug register numbers onto internal register numbers.  */
+  set_gdbarch_stab_reg_to_regnum (gdbarch, nanomips_stab_reg_to_regnum);
+  set_gdbarch_ecoff_reg_to_regnum (gdbarch,
+				   nanomips_dwarf_dwarf2_ecoff_reg_to_regnum);
+  set_gdbarch_dwarf2_reg_to_regnum (gdbarch,
+				    nanomips_dwarf_dwarf2_ecoff_reg_to_regnum);
+  set_gdbarch_register_sim_regno (gdbarch, nanomips_register_sim_regno);
+
+  /* nanoMIPS version of CALL_DUMMY.  */
+
+  set_gdbarch_call_dummy_location (gdbarch, ON_STACK);
+  set_gdbarch_push_dummy_code (gdbarch, nanomips_push_dummy_code);
+  set_gdbarch_frame_align (gdbarch, nanomips_frame_align);
+
+  set_gdbarch_print_float_info (gdbarch, nanomips_print_float_info);
+
+  set_gdbarch_convert_register_p (gdbarch, nanomips_convert_register_p);
+  set_gdbarch_register_to_value (gdbarch, nanomips_register_to_value);
+  set_gdbarch_value_to_register (gdbarch, nanomips_value_to_register);
+
+  set_gdbarch_inner_than (gdbarch, core_addr_lessthan);
+  set_gdbarch_breakpoint_kind_from_pc (gdbarch,
+				       nanomips_breakpoint_kind_from_pc);
+  set_gdbarch_sw_breakpoint_from_kind (gdbarch,
+				       nanomips_sw_breakpoint_from_kind);
+
+  set_gdbarch_skip_prologue (gdbarch, nanomips_skip_prologue);
+
+  set_gdbarch_stack_frame_destroyed_p (gdbarch,
+				       nanomips_stack_frame_destroyed_p);
+
+  set_gdbarch_pointer_to_address (gdbarch, signed_pointer_to_address);
+  set_gdbarch_address_to_pointer (gdbarch, address_to_signed_pointer);
+  set_gdbarch_integer_to_address (gdbarch, nanomips_integer_to_address);
+
+  set_gdbarch_print_registers_info (gdbarch, nanomips_print_registers_info);
+
+  if (nanomips_abi == NANOMIPS_ABI_P64)
+    set_gdbarch_print_insn (gdbarch, gdb_print_insn_nanomips_p64);
+  else
+    set_gdbarch_print_insn (gdbarch, gdb_print_insn_nanomips_p32);
+
+  /* FIXME: cagney/2003-08-29: The macros target_have_steppable_watchpoint,
+     HAVE_NONSTEPPABLE_WATCHPOINT, and target_have_continuable_watchpoint
+     need to all be folded into the target vector.  Since they are
+     being used as guards for target_stopped_by_watchpoint, why not have
+     target_stopped_by_watchpoint return the type of watchpoint that the code
+     is sitting on?  */
+  set_gdbarch_have_nonsteppable_watchpoint (gdbarch, 1);
+
+  /* Virtual tables.  */
+  set_gdbarch_vbit_in_delta (gdbarch, 0);
+
+  /* Hook in OS ABI-specific overrides, if they have been registered.  */
+  info.target_desc = tdesc;
+  info.tdesc_data = tdesc_data.get ();
+  gdbarch_init_osabi (info, gdbarch);
+
+  /* Unwind the frame.  */
+  dwarf2_append_unwinders (gdbarch);
+  frame_unwind_append_unwinder (gdbarch, &nanomips_frame_unwind);
+  frame_base_append_sniffer (gdbarch, dwarf2_frame_base_sniffer);
+  frame_base_append_sniffer (gdbarch, nanomips_frame_base_sniffer);
+
+  regnum = GDBARCH_OBSTACK_ZALLOC (gdbarch, struct nanomips_regnum);
+  *regnum = nanomips_regnum;
+  tdep->regnum = regnum;
+
+  set_gdbarch_num_regs (gdbarch, num_regs);
+  set_tdesc_pseudo_register_type (gdbarch, nanomips_pseudo_register_type);
+  tdesc_use_registers (gdbarch, info.target_desc, std::move (tdesc_data));
+
+  /* Override the normal target description methods to handle our
+     dual real and pseudo registers.  */
+  set_gdbarch_register_name (gdbarch, nanomips_register_name);
+  set_gdbarch_register_reggroup_p (gdbarch,
+				   nanomips_tdesc_register_reggroup_p);
+
+  /* The target description may have adjusted num_regs, fetch the final
+     value and set pc_regnum and sp_regnum now that it has been fixed.  */
+  num_regs = gdbarch_num_regs (gdbarch);
+  set_gdbarch_num_pseudo_regs (gdbarch, num_regs);
+  set_gdbarch_pc_regnum (gdbarch, NANOMIPS_PC_REGNUM + num_regs);
+  set_gdbarch_sp_regnum (gdbarch, NANOMIPS_SP_REGNUM + num_regs);
+  if (regnum->fpr != -1)
+    set_gdbarch_fp0_regnum (gdbarch, regnum->fpr + NANOMIPS_FP0_REGNUM);
+  set_gdbarch_virtual_frame_pointer (gdbarch, nanomips_virtual_frame_pointer);
+
+  return gdbarch;
+}
+
+static void
+nanomips_dump_tdep (struct gdbarch *gdbarch, struct ui_file *file)
+{
+  struct nanomips_gdbarch_tdep *tdep = gdbarch_tdep<nanomips_gdbarch_tdep> (gdbarch);
+  if (tdep != NULL)
+    {
+      int ef_mips_arch;
+      int ef_mips_32bitmode;
+      /* Determine the ISA.  */
+      switch (tdep->elf_flags & EF_NANOMIPS_ARCH)
+	{
+	case E_NANOMIPS_ARCH_32R6:
+	  ef_mips_arch = 1;
+	  break;
+	case E_NANOMIPS_ARCH_64R6:
+	  ef_mips_arch = 2;
+	  break;
+	default:
+	  ef_mips_arch = 0;
+	  break;
+	}
+      /* Determine the size of a pointer.  */
+      ef_mips_32bitmode = (tdep->elf_flags & EF_NANOMIPS_32BITMODE);
+      gdb_printf (file,
+			  "nanomips_dump_tdep: tdep->elf_flags = 0x%x\n",
+			  tdep->elf_flags);
+      gdb_printf (file,
+			  "nanomips_dump_tdep: ef_mips_32bitmode = %d\n",
+			  ef_mips_32bitmode);
+      gdb_printf (file,
+			  "nanomips_dump_tdep: ef_mips_arch = %d\n",
+			  ef_mips_arch);
+      gdb_printf (file,
+			  "nanomips_dump_tdep: tdep->nanomips_abi = %d (%s)\n",
+			  tdep->nanomips_abi,
+			  nanomips_abi_strings[tdep->nanomips_abi]);
+      gdb_printf (file,
+			  "nanomips_dump_tdep: "
+			  "nanomips_mask_address_p() %d (default %d)\n",
+			  nanomips_mask_address_p (tdep),
+			  tdep->default_mask_address_p);
+    }
+
+  gdb_printf (file,
+		      "nanomips_dump_tdep: FPU_TYPE = %d (%s)\n",
+		      FPU_TYPE (gdbarch),
+		      (FPU_TYPE (gdbarch) == NANOMIPS_FPU_NONE ? "unknown"
+		       : FPU_TYPE (gdbarch) == NANOMIPS_FPU_HARD ?
+						"64bit hardware floating point"
+		       : FPU_TYPE (gdbarch) == NANOMIPS_FPU_SOFT ?
+						"Software floating point"
+		       : "???"));
+}
+
+void _initialize_nanomips_tdep(); /* -Wmissing-prototypes */
+
+void
+_initialize_nanomips_tdep ()
+{
+  gdbarch_register (bfd_arch_nanomips, nanomips_gdbarch_init,
+		    nanomips_dump_tdep);
+
+  initialize_tdesc_nanomips ();
+
+  /* Add root prefix command for all "set/show nanomips" commands.  */
+  add_prefix_cmd ("nanomips", no_class, set_nanomips_command,
+		  _("Various nanoMIPS specific commands."),
+		  &setnanomipscmdlist, 0, &setlist);
+
+  add_prefix_cmd ("nanomips", no_class, show_nanomips_command,
+		  _("Various nanoMIPS specific commands."),
+		  &shownanomipscmdlist, 0, &showlist);
+
+  /* We really would like to have both "0" and "unlimited" work, but
+     command.c doesn't deal with that.  So make it a var_zinteger
+     because the user can always use "999999" or some such for unlimited.  */
+  add_setshow_zinteger_cmd ("heuristic-fence-post", class_support,
+			    &heuristic_fence_post, _("\
+Set the distance searched for the start of a function."), _("\
+Show the distance searched for the start of a function."), _("\
+If you are debugging a stripped executable, GDB needs to search through the\n\
+program for the start of a function.  This command sets the distance of the\n\
+search.  The only need to set it is when debugging a stripped executable."),
+			    reinit_frame_cache_sfunc,
+			    NULL, /* FIXME: i18n: The distance searched for
+				     the start of a function is %s.  */
+			    &setlist, &showlist);
+
+  /* Allow the user to control whether the upper bits of 64-bit
+     addresses should be zeroed.  */
+  add_setshow_auto_boolean_cmd ("mask-address", no_class,
+				&mask_address_var, _("\
+Set zeroing of upper 32 bits of 64-bit addresses."), _("\
+Show zeroing of upper 32 bits of 64-bit addresses."), _("\
+Use \"on\" to enable the masking, \"off\" to disable it and \"auto\" to\n\
+allow GDB to determine the correct value."),
+				NULL, show_mask_address,
+				&setnanomipscmdlist, &shownanomipscmdlist);
+
+  /* Debug this files internals.  */
+  add_setshow_zuinteger_cmd ("nanomips", class_maintenance,
+			     &nanomips_debug, _("\
+Set nanomips debugging."), _("\
+Show nanomips debugging."), _("\
+When non-zero, nanomips specific debugging is enabled."),
+			     NULL,
+			     NULL, /* FIXME: i18n: Mips debugging is
+				      currently %s.  */
+			     &setdebuglist, &showdebuglist);
+}

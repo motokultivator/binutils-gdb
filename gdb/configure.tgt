@@ -448,6 +448,16 @@ msp430-*-elf*)
 	gdb_target_obs="msp430-tdep.o"
 	;;
 
+mt-*-*)
+	# Target: Morpho Technologies ms1 processor
+	gdb_target_obs="mt-tdep.o"
+	;;
+
+nanomips*-*-*)
+	# Target: nanomips ELF
+	gdb_target_obs="nanomips-tdep.o"
+	;;
+
 nds32*-*-elf)
 	# Target: AndesTech NDS32 core
 	gdb_target_obs="nds32-tdep.o"
@@ -766,6 +776,7 @@ m32r-*-*)		gdb_sim=m32r ;;
 m68hc11-*-*|m6811-*-*)	gdb_sim=m68hc11 ;;
 microblaze*-*-*)	gdb_sim=microblaze ;;
 mips*-*-*)		gdb_sim=mips ;;
+nanomips*-*-*)	gdb_sim=mips ;;
 mn10300*-*-*)		gdb_sim=mn10300 ;;
 moxie-*-*)		gdb_sim=moxie ;;
 msp430*-*-*)		gdb_sim=msp430 ;;
