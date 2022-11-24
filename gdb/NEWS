@@ -480,6 +480,7 @@ winheight
 
 * New targets
 
+GNU/ELF/nanoMIPS      nanomips*-*-*
 GNU/Linux/LoongArch		loongarch*-*-linux*
 
 * Removed targets
