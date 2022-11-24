@@ -356,6 +356,8 @@ sim_open (SIM_OPEN_KIND kind, host_callback *cb,
 
   cpu = STATE_CPU (sd, 0); /* FIXME */
 
+  IS_NANOMIPS = 0;
+
   /* FIXME: watchpoints code shouldn't need this */
   STATE_WATCHPOINTS (sd)->interrupt_handler = interrupt_event;
 
@@ -672,10 +674,13 @@ sim_open (SIM_OPEN_KIND kind, host_callback *cb,
 	  cpu->register_widths[rn] = WITH_TARGET_FLOATING_POINT_BITSIZE;
 	else if ((rn >= 33) && (rn <= 37))
 	  cpu->register_widths[rn] = WITH_TARGET_WORD_BITSIZE;
+	else if ((rn >= 70) && (rn <= 78))
+	  cpu->register_widths[rn] = WITH_TARGET_WORD_BITSIZE;
 	else if ((rn == SRIDX)
 		 || (rn == FCR0IDX)
 		 || (rn == FCR31IDX)
-		 || ((rn >= 72) && (rn <= 89)))
+		 || (rn == DSPCRIDX)
+		 || ((rn >= 80) && (rn <= 89)))
 	  cpu->register_widths[rn] = 32;
 	else
 	  cpu->register_widths[rn] = 0;
@@ -1200,7 +1205,7 @@ sim_monitor (SIM_DESC sd,
     case 6: /* int open(char *path,int flags) */
       {
 	char *path = fetch_str (sd, A0);
-	V0 = sim_io_open (sd, path, (int)A1);
+	SET_RV0 (sim_io_open (sd, path, (int)A1));
 	free (path);
 	break;
       }
@@ -1210,7 +1215,7 @@ sim_monitor (SIM_DESC sd,
 	int fd = A0;
 	int nr = A2;
 	char *buf = zalloc (nr);
-	V0 = sim_io_read (sd, fd, buf, nr);
+	SET_RV0 (sim_io_read (sd, fd, buf, nr));
 	sim_write (sd, A1, buf, nr);
 	free (buf);
       }
@@ -1222,7 +1227,7 @@ sim_monitor (SIM_DESC sd,
 	int nr = A2;
 	char *buf = zalloc (nr);
 	sim_read (sd, A1, buf, nr);
-	V0 = sim_io_write (sd, fd, buf, nr);
+	SET_RV0 (sim_io_write (sd, fd, buf, nr));
 	if (fd == 1)
 	    sim_io_flush_stdout (sd);
 	else if (fd == 2)
@@ -1233,14 +1238,14 @@ sim_monitor (SIM_DESC sd,
 
     case 10: /* int close(int file) */
       {
-	V0 = sim_io_close (sd, (int)A0);
+	SET_RV0 (sim_io_close (sd, (int)A0));
 	break;
       }
 
     case 2:  /* Densan monitor: char inbyte(int waitflag) */
       {
 	if (A0 == 0)	/* waitflag == NOWAIT */
-	  V0 = (unsigned_word)-1;
+	    SET_RV0 ((unsigned_word)-1);
       }
      /* Drop through to case 11 */
 
@@ -1252,10 +1257,10 @@ sim_monitor (SIM_DESC sd,
         if (sim_io_read_stdin (sd, &tmp, sizeof(char)) != sizeof(char))
 	  {
 	    sim_io_error(sd,"Invalid return from character read");
-	    V0 = (unsigned_word)-1;
+	    SET_RV0 ((unsigned_word)-1);
 	  }
         else
-	  V0 = (unsigned_word)tmp;
+	    SET_RV0 ((unsigned_word)tmp);
 	break;
       }
 
