@@ -1381,7 +1381,7 @@ nanomips_elfNN_object_p (bfd *abfd)
 
 #define ELF_ARCH			bfd_arch_nanomips
 #define ELF_TARGET_ID			NANOMIPS_ELF_DATA
-#define ELF_MACHINE_CODE		EM_IMG1
+#define ELF_MACHINE_CODE		EM_NANOMIPS
 
 #define elf_backend_collect		true
 #define elf_backend_type_change_ok	true

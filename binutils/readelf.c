@@ -1098,7 +1098,7 @@ guess_is_rela (unsigned int e_machine)
     case EM_MSP430:
     case EM_MSP430_OLD:
     case EM_MT:
-    case EM_IMG1:
+    case EM_NANOMIPS:
     case EM_NDS32:
     case EM_NIOS32:
     case EM_OR1K:
@@ -1896,7 +1896,7 @@ dump_relocations (Filedata *filedata,
 	  rtype = elf_nios2_reloc_type (type);
 	  break;
 
-	case EM_IMG1:
+	case EM_NANOMIPS:
 	  rtype = elf_nanomips_reloc_type (type);
 	  break;
 
@@ -2587,7 +2587,7 @@ get_dynamic_type (Filedata * filedata, unsigned long type)
 	    case EM_RISCV:
 	      result = get_riscv_dynamic_type (type);
 	      break;
-	    case EM_IMG1:
+	    case EM_NANOMIPS:
 	      result = get_nanomips_dynamic_type (type);
 	      break;
 	    default:
@@ -2982,7 +2982,7 @@ get_machine_name (unsigned e_machine)
     case EM_CEVA_X2:		return "CEVA X2 Processor Family";
     case EM_BPF:		return "Linux BPF";
     case EM_GRAPHCORE_IPU:	return "Graphcore Intelligent Processing Unit";
-    case EM_IMG1:		return "Imagination Technologies";
+    case EM_NANOMIPS:		return "Imagination Technologies";
       /* 250 */
     case EM_NFP:		return "Netronome Flow Processor";
     case EM_VE:			return "NEC Vector Engine";
@@ -4412,7 +4412,7 @@ get_machine_flags (Filedata * filedata, unsigned e_flags, unsigned e_machine)
 	    strcat (buf, ", OBJ-v1");
 
 	  break;
-	case EM_IMG1:
+	case EM_NANOMIPS:
 	  if (e_flags & EF_NANOMIPS_PIC)
 	    strcat (buf, ", pic");
 
@@ -4739,7 +4739,7 @@ get_segment_type (Filedata * filedata, unsigned long p_type)
 	    case EM_S390_OLD:
 	      result = get_s390_segment_type (p_type);
 	      break;
-	    case EM_IMG1:
+	    case EM_NANOMIPS:
 	      result = get_nanomips_segment_type (p_type);
 	      break;
 	    case EM_RISCV:
@@ -12143,7 +12143,7 @@ the .dynstr section doesn't match the DT_STRTAB and DT_STRSZ tags\n"));
 		case EM_IA_64:
 		  dynamic_section_ia64_val (entry);
 		  break;
-		case EM_IMG1:
+		case EM_NANOMIPS:
 		  dynamic_section_nanomips_val (entry);
 		  break;
 		default:
@@ -14436,7 +14436,7 @@ is_32bit_abs_reloc (Filedata * filedata, unsigned int reloc_type)
       return reloc_type == 1; /* R_MSP430_32 or R_MSP320_ABS32.  */
     case EM_MT:
       return reloc_type == 2; /* R_MT_32.  */
-    case EM_IMG1:
+    case EM_NANOMIPS:
       return reloc_type == 1; /* R_NANOMIPS_32.  */
     case EM_NDS32:
       return reloc_type == 20; /* R_NDS32_32_RELA.  */
@@ -14642,7 +14642,7 @@ is_64bit_abs_reloc (Filedata * filedata, unsigned int reloc_type)
       return reloc_type == 1; /* R_TILEGX_64.  */
     case EM_MIPS:
       return reloc_type == 18;	/* R_MIPS_64.  */
-    case EM_IMG1:
+    case EM_NANOMIPS:
       return reloc_type == 2; /* R_NANOMIPS_64.  */
     default:
       return false;
@@ -14751,7 +14751,7 @@ is_16bit_abs_reloc (Filedata * filedata, unsigned int reloc_type)
       /* Fall through.  */
     case EM_MSP430_OLD:
       return reloc_type == 5; /* R_MSP430_16_BYTE.  */
-    case EM_IMG1:
+    case EM_NANOMIPS:
       return reloc_type == 7; /* R_NANOMIPS_UNSIGNED_16 */
     case EM_NDS32:
       return reloc_type == 19; /* R_NDS32_16_RELA.  */
@@ -14981,7 +14981,7 @@ is_none_reloc (Filedata * filedata, unsigned int reloc_type)
     case EM_MOXIE:   /* R_MOXIE_NONE.  */
     case EM_NIOS32:  /* R_NIOS_NONE.  */
     case EM_OR1K:    /* R_OR1K_NONE. */
-    case EM_IMG1:    /* R_NANOMIPS_NONE.  */
+    case EM_NANOMIPS:    /* R_NANOMIPS_NONE.  */
     case EM_PARISC:  /* R_PARISC_NONE.  */
     case EM_PPC64:   /* R_PPC64_NONE.  */
     case EM_PPC:     /* R_PPC_NONE.  */
@@ -22673,7 +22673,7 @@ process_arch_specific (Filedata * filedata)
       return process_attributes (filedata, "c6xabi", SHT_C6000_ATTRIBUTES,
 				 display_tic6x_attribute,
 				 display_generic_attribute);
-    case EM_IMG1:
+    case EM_NANOMIPS:
       return process_nanomips_specific (filedata);
 
     case EM_CSKY:
