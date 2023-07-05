@@ -1718,7 +1718,7 @@ do_start_initialization ()
 #ifdef IS_PY3K
   gdb_module = PyModule_Create (&python_GdbModuleDef);
   /* Add _gdb module to the list of known built-in modules.  */
-  _PyImport_FixupBuiltin (gdb_module, "_gdb");
+  _PyImport_FixupBuiltin (gdb_module, "_gdb", gdb_module);
 #else
   gdb_module = Py_InitModule ("_gdb", python_GdbMethods);
 #endif
