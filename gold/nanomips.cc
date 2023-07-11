@@ -4532,6 +4532,7 @@ Nanomips_transformations<size, big_endian>::transform(
     size_t relnum,
     uint32_t insn)
 {
+	printf("radim transform %d %8X\n", size, insn);
   ++Nanomips_transformations<size, big_endian>::instruction_count;
   gold_assert(transform_template != NULL);
   gold_assert(insn_property != NULL);
@@ -4731,6 +4732,8 @@ Nanomips_transformations<size, big_endian>::transform(
 
       // Write instruction.
       this->write_insn(pov, new_insn, new_insn_size);
+      // new_insn_size = 2;
+      // this->write_insn(pov, 0xaaaaaaaa, new_insn_size);
 
       pov += new_insn_size;
       offset += new_insn_size;
@@ -5037,6 +5040,7 @@ Nanomips_relax_insn<size, big_endian>::type(
     Address address,
     Address gp)
 {
+	printf("Radim %ld relax_insn %d opcode: %8X addr: %8X\n", relnum, size, insn, (unsigned int)address);
   const Address invalid_address = static_cast<Address>(0) - 1;
   const Nanomips_relobj<size, big_endian>* relobj =
     Nanomips_relobj<size, big_endian>::as_nanomips_relobj(relinfo->object);
@@ -5165,11 +5169,13 @@ Nanomips_relax_insn<size, big_endian>::type(
     case elfcpp::R_NANOMIPS_GOT_DISP:
     case elfcpp::R_NANOMIPS_GOT_PAGE:
     case elfcpp::R_NANOMIPS_GOT_OFST:
-    case elfcpp::R_NANOMIPS_JALR32:
     case elfcpp::R_NANOMIPS_JALR16:
       return this->relax_code_and_data_models(relobj, gsym, psymval,
                                               insn_property, reloc,
                                               insn, address, gp);
+    case elfcpp::R_NANOMIPS_JALR32:
+    	printf("Nasli smo\n");
+    	break;
     default:
       gold_unreachable();
     }
@@ -5759,6 +5765,7 @@ Target_nanomips<size, big_endian>::do_relax(
   typedef std::vector<Output_relaxed_input_section*> Relaxed_sections;
   typedef Unordered_map<Output_section*, Relaxed_sections>
       Grouped_relaxed_sections;
+printf("Gutemberg\n");
 
   // Whether we need to continue with relaxation pass.
   bool again = false;
