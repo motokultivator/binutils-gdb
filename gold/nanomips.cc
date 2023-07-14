@@ -44,7 +44,9 @@
 #include "attributes.h"
 #include "nanomips-reloc-property.h"
 #include "nanomips-insn-property.h"
-
+void prin(const char*, ...) {
+	printf("jumko\n");
+}
 namespace
 {
 using namespace gold;
@@ -1186,6 +1188,7 @@ class Nanomips_relobj : public Sized_relobj_file<size, big_endian>
   {
     typedef std::vector<Nanomips_reloc<size> > Gprel_relocs;
     typedef std::set<Nanomips_reloc<size> > Saveres_relocs;
+    typedef std::set<Nanomips_reloc<size> > BALC_relocs;
     typedef std::vector<std::pair<size_t, Nanomips_reloc<size> > >
         Gpsetup_relocs;
 
@@ -1196,9 +1199,11 @@ class Nanomips_relobj : public Sized_relobj_file<size, big_endian>
     Gprel_relocs gprel_relocs;
     // GP-setup relocations.
     Gpsetup_relocs gpsetup_relocs;
+    // BALC relocations.
+    BALC_relocs balc_relocs;
 
     Gpsetup_optimization()
-      : saveres_relocs(), gprel_relocs(), gpsetup_relocs()
+      : saveres_relocs(), gprel_relocs(), gpsetup_relocs(), balc_relocs()
     { }
   };
 
@@ -1317,6 +1322,12 @@ class Nanomips_input_section : public Output_relaxed_input_section
   void
   init(unsigned int reloc_shndx);
 
+  void dump() {
+  	for (size_t i = 0; i < this->contents_.len; i++) {
+  		printf("%02X ", (unsigned int)this->contents_.data[i]);
+  	}
+  	printf("\n Relocs (%ld = %ld / %d):\n", reloc_count(), this->relocs_.len, this->reloc_size_);
+  }
   // Return the contents of the text section.
   unsigned char*
   section_contents()
@@ -1494,7 +1505,7 @@ class Nanomips_transformations
 
  public:
   Nanomips_transformations()
-  { }
+  { prin("CC %s\n", __func__); }
 
   // Handle alignment requirement.
   void
@@ -1588,7 +1599,7 @@ class Nanomips_relax_insn : public Nanomips_transformations<size, big_endian>
  public:
   Nanomips_relax_insn()
     : Nanomips_transformations<size, big_endian>()
-  { }
+  { prin("CC %s\n", __func__); }
 
   // Return matching instruction for relaxation if there is one and INSN can
   // be relaxed, otherwise return NULL.
@@ -1633,7 +1644,7 @@ class Nanomips_relax_insn_finalize
  public:
   Nanomips_relax_insn_finalize()
     : Nanomips_relax_insn<size, big_endian>()
-  { }
+  { prin("CC %s\n", __func__);}
 
   // Return the transformation type if this instruction can be relaxed
   // during --finalize-relocs.
@@ -1661,7 +1672,7 @@ class Nanomips_expand_insn : public Nanomips_transformations<size, big_endian>
  public:
   Nanomips_expand_insn()
     : Nanomips_transformations<size, big_endian>()
-  { }
+  { prin("CC %s\n", __func__);}
 
   // Return matching instruction for expansion if there is one.
   const Nanomips_insn_property*
@@ -1710,7 +1721,7 @@ class Nanomips_expand_insn_finalize
  public:
   Nanomips_expand_insn_finalize()
     : Nanomips_expand_insn<size, big_endian>()
-  { }
+  { prin("CC %s\n", __func__);}
 
   // Return the transformation type if instruction needs to be expanded
   // during --finalize-relocs.
@@ -1793,6 +1804,7 @@ class Nanomips_scan_relocatable_relocs :
   inline Relocatable_relocs::Reloc_strategy
   local_non_section_strategy(unsigned int r_type, bool in_same_section)
   {
+  	prin("CC %s\n", __func__);
     switch (r_type)
       {
       case elfcpp::R_NANOMIPS_ALIGN:
@@ -1830,6 +1842,7 @@ class Nanomips_scan_relocatable_relocs :
   inline Relocatable_relocs::Reloc_strategy
   global_strategy(unsigned int r_type, bool in_same_section)
   {
+  	prin("CC %s\n", __func__);
     switch (r_type)
       {
       case elfcpp::R_NANOMIPS_PC_I32:
@@ -1867,7 +1880,7 @@ class Target_nanomips : public Sized_target<size, big_endian>
       stubs_(NULL), rel_dyn_(NULL), copy_relocs_(elfcpp::R_NANOMIPS_COPY),
       gp_(NULL), attributes_section_data_(NULL), abiflags_(NULL),
       got_mod_index_offset_(-1U), has_abiflags_section_(false)
-  { }
+  { prin("CC %s\n", __func__); }
 
   // Make a new symbol table entry for the Nanomips target.
   Sized_symbol<size>*
@@ -3831,6 +3844,7 @@ Nanomips_relobj<size, big_endian>::scan_sections_for_transform(
 
       if (input_section == NULL)
         {
+          printf("Cergar\n");
           // Get the relocations.
           unsigned int reloc_size = elfcpp::Elf_sizes<size>::rela_size;
           section_size_type relocs_size;
@@ -3844,9 +3858,12 @@ Nanomips_relobj<size, big_endian>::scan_sections_for_transform(
           section_size_type view_size;
           view = this->section_contents(data_shndx, &view_size, false);
           output_address = os->address() + output_offset;
+          for (int i = 0; i < 16; i++) printf("%02X ", view[i]);
+          printf("\n");
         }
       else
         {
+        	input_section->dump();
           output_address = input_section->address();
           prelocs = input_section->relocs();
           reloc_count = input_section->reloc_count();
@@ -4532,7 +4549,7 @@ Nanomips_transformations<size, big_endian>::transform(
     size_t relnum,
     uint32_t insn)
 {
-	printf("radim transform %d %8X\n", size, insn);
+	prin("radim transform %d %8X\n", size, insn);
   ++Nanomips_transformations<size, big_endian>::instruction_count;
   gold_assert(transform_template != NULL);
   gold_assert(insn_property != NULL);
@@ -5040,7 +5057,7 @@ Nanomips_relax_insn<size, big_endian>::type(
     Address address,
     Address gp)
 {
-	printf("Radim %ld relax_insn %d opcode: %8X addr: %8X\n", relnum, size, insn, (unsigned int)address);
+	prin("Radim %ld relax_insn %d opcode: %8X addr: %8X\n", relnum, size, insn, (unsigned int)address);
   const Address invalid_address = static_cast<Address>(0) - 1;
   const Nanomips_relobj<size, big_endian>* relobj =
     Nanomips_relobj<size, big_endian>::as_nanomips_relobj(relinfo->object);
@@ -5174,7 +5191,7 @@ Nanomips_relax_insn<size, big_endian>::type(
                                               insn_property, reloc,
                                               insn, address, gp);
     case elfcpp::R_NANOMIPS_JALR32:
-    	printf("Nasli smo\n");
+    	prin("Nasli smo\n");
     	break;
     default:
       gold_unreachable();
@@ -5765,7 +5782,7 @@ Target_nanomips<size, big_endian>::do_relax(
   typedef std::vector<Output_relaxed_input_section*> Relaxed_sections;
   typedef Unordered_map<Output_section*, Relaxed_sections>
       Grouped_relaxed_sections;
-printf("Gutemberg\n");
+prin("Gutemberg\n");
 
   // Whether we need to continue with relaxation pass.
   bool again = false;
@@ -7044,7 +7061,7 @@ Target_nanomips<size, big_endian>::scan_section_for_transform(
     std::vector<Output_relaxed_input_section*>* new_relaxed_sections,
     const unsigned char* view,
     Address view_address)
-{
+{prin("C %s\n", __func__);
   gold_assert(sh_type == elfcpp::SHT_RELA);
 
   if (this->state_ == RELAX)
@@ -7190,7 +7207,7 @@ Target_nanomips<size, big_endian>::scan_reloc_section_for_transform(
     std::vector<Output_relaxed_input_section*>* new_relaxed_sections,
     const unsigned char* view,
     Address view_address)
-{
+{prin("C %s\n", __func__);
   typedef typename elfcpp::Rela<size, big_endian> Reltype;
   const int reloc_size = elfcpp::Elf_sizes<size>::rela_size;
   Relocate_comdat_behavior default_comdat_behavior;
@@ -7519,6 +7536,8 @@ Target_nanomips<size, big_endian>::Scan::local(
     const elfcpp::Sym<size, big_endian>& lsym,
     bool is_discarded)
 {
+  printf("Aca - ovde sam lokal\n");
+
   if (is_discarded)
     return;
 
@@ -7739,6 +7758,28 @@ Target_nanomips<size, big_endian>::Scan::local(
             relobj->add_saveres_reloc(data_shndx, saveres);
             break;
           }
+        case elfcpp::R_NANOMIPS_JALR32: { // new reloc
+           if (parameters->options().relax()) {
+             section_size_type view_size = 0;
+             const unsigned char* view = relobj->section_contents(data_shndx,
+                                                               &view_size,
+                                                               false);
+             Nanomips_relax_insn<size, big_endian> relax_insn;
+             uint32_t insn = read_nanomips_insn<big_endian>(view + r_offset,
+                                                         nrp->size());
+          const Nanomips_insn_property* insn_property =
+            relax_insn.find_insn(relobj, insn, nrp->mask(), r_type);
+
+          if (insn_property != NULL) {
+             printf("Profesore nasli smo %08X\n", insn);
+             // treba ih napakovti u neki kontejner
+             // kada prodju relokacije ove insn ce biti modifikovane pravim adresama ?
+             // onda na pocetku do_relax, u prvom prolazu, treba odrediti grupe koje ce da bacaju na istu trampolinu
+             // nemam blage veze kako da dodam trampolinu, a da ne zeznem adrese svega zivog
+		}
+	}
+        	break;
+        }
         case elfcpp::R_NANOMIPS_GOT_CALL:
         case elfcpp::R_NANOMIPS_GOT_PAGE:
         case elfcpp::R_NANOMIPS_GOT_DISP:
@@ -7783,6 +7824,8 @@ Target_nanomips<size, big_endian>::Scan::global(
     size_t relnum,
     Symbol* gsym)
 {
+	  prin("Aca - ovde sam global\n");
+
   const elfcpp::Rela<size, big_endian> reloc(preloc);
   unsigned int r_type = elfcpp::elf_r_type<size>(reloc.get_r_info());
   Address r_offset = reloc.get_r_offset();
@@ -8053,6 +8096,10 @@ Target_nanomips<size, big_endian>::Scan::global(
             relobj->add_saveres_reloc(data_shndx, saveres);
             break;
           }
+        case elfcpp::R_NANOMIPS_JALR32: {
+        	prin("Aca - ovde sam global\n");
+        	break;
+        }
         case elfcpp::R_NANOMIPS_PC21_S1:
           if (strcmp(gsym->name(), "_gp") == 0)
             {
@@ -8595,7 +8642,9 @@ public:
   { }
 
   Target* do_instantiate_target()
-  { return new Target_nanomips<size, big_endian>(); }
+  { 
+  	prin("C %s\n", __func__);
+  	return new Target_nanomips<size, big_endian>(); }
 };
 
 Target_selector_nanomips<32, true> target_selector_nanomips32;

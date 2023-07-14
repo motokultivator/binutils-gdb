@@ -232,6 +232,9 @@ NTT(PCREL_NMF,        RELS(R(PC25_S1)),                               INSNS(LAPC
 NTT(PCREL16_LONG,     RELS(R(PC25_S1)),                               INSNS(ALUIPC32(PC_HI20, SREG), ORI32(LO12, SREG, SREG), JALRC16(SREG)))
 NTT(PCREL32_LONG,     RELS(R(PC25_S1)),                               INSNS(ALUIPC32(PC_HI20, SREG), ORI32(LO12, SREG, SREG), JALRC32))
 
+// Aca dodao:
+NTT(PCREL16,          RELS(R(JALR32)),                                INSNS(BALC16))
+
 // bc sym
 NIP32("bc",             0x28000000,    NULL,                 NULL,                  NULL,                 NULL)
 NTT(ABS_NMF,          RELS(R(PC25_S1)),                               INSNS(LI48, JRC16))
