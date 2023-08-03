@@ -121,6 +121,9 @@
 #define JRC32 NIT32("jrc", 0x48000000, NONE, NULL, INS_REG(16, 5, SREG))
 // lapc $reg, sym
 #define LAPC32(tregmap) NIT32("lapc", 0x04000000, PC21_S1, INS_REG(21, 5, tregmap), NULL)
+// This one is used for generating trampolines.
+// lapc $rt, 4
+#define LAPC_FIXED NIT32("lapc_fixed", 0x07e00004, FIXED, NULL, NULL)
 // lui $reg, %reloc(sym)
 #define LUI32(reloc, tregmap) NIT32("lui", 0xe0000000, reloc, INS_REG(21, 5, tregmap), NULL)
 // lb $reg, %gprel(sym)($gp)
@@ -231,6 +234,8 @@ NTT(PCREL16,          RELS(R(PC25_S1)),                               INSNS(BALC
 NTT(PCREL_NMF,        RELS(R(PC25_S1)),                               INSNS(LAPC48, JALRC16(SREG)))
 NTT(PCREL16_LONG,     RELS(R(PC25_S1)),                               INSNS(ALUIPC32(PC_HI20, SREG), ORI32(LO12, SREG, SREG), JALRC16(SREG)))
 NTT(PCREL32_LONG,     RELS(R(PC25_S1)),                               INSNS(ALUIPC32(PC_HI20, SREG), ORI32(LO12, SREG, SREG), JALRC32))
+NTT(BALC_TRAMP,       RELS(R(PC25_S1)),                               INSNS(LAPC_FIXED, BC32))
+NTT(BALC_CALL,        RELS(R(PC25_S1)),                               INSNS(BALC16))
 
 // bc sym
 NIP32("bc",             0x28000000,    NULL,                 NULL,                  NULL,                 NULL)
