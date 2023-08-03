@@ -75,7 +75,10 @@ enum Transform_type
   // Transform to 16-bit save/restore.jrc instruction.
   TT_SAVERESTORE16,
   // Transform to 16-bit bxxzc instruction.
-  TT_PCREL16_ZERO
+  TT_PCREL16_ZERO,
+  // Transform balc 32-bit to balc 16-bit via trampoline.
+  TT_BALC_CALL,
+  TT_BALC_TRAMP,
 };
 
 // The Nanomips_insn_template class is to store information about a
