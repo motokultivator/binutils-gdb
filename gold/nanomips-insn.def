@@ -170,6 +170,10 @@
 #define BALC16 NIT16("balc[16]", 0x3800, PC10_S1, NULL, NULL)
 // bc16 sym
 #define BC16 NIT16("bc[16]", 0x1800, PC10_S1, NULL, NULL)
+
+#define BC16_FIXED NIT16("bc[16]", 0x1804, FIXED, NULL, NULL)
+#define BALC16_FIXED NIT16("balc[16]", 0x3802, FIXED, NULL, NULL)
+
 // beqc16 $reg, $reg, sym
 #define BEQC16 NIT16("beqc[16]", 0xd800, PC4_S1, INS_REG(7, 3, TREG), INS_REG(4, 3, SREG))
 // bnec16 $reg, $reg, sym
@@ -234,7 +238,7 @@ NTT(PCREL16,          RELS(R(PC25_S1)),                               INSNS(BALC
 NTT(PCREL_NMF,        RELS(R(PC25_S1)),                               INSNS(LAPC48, JALRC16(SREG)))
 NTT(PCREL16_LONG,     RELS(R(PC25_S1)),                               INSNS(ALUIPC32(PC_HI20, SREG), ORI32(LO12, SREG, SREG), JALRC16(SREG)))
 NTT(PCREL32_LONG,     RELS(R(PC25_S1)),                               INSNS(ALUIPC32(PC_HI20, SREG), ORI32(LO12, SREG, SREG), JALRC32))
-NTT(BALC_TRAMP,       RELS(R(PC25_S1)),                               INSNS(LAPC_FIXED, BC32))
+NTT(BALC_TRAMP,       RELS(R(PC25_S1)),                               INSNS(BALC16_FIXED, BC16_FIXED, BC32))
 NTT(BALC_CALL,        RELS(R(PC25_S1)),                               INSNS(BALC16))
 
 // bc sym
