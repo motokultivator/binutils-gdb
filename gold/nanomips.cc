@@ -193,6 +193,32 @@ is_forced_insn_length(typename elfcpp::Elf_types<size>::Elf_Addr offset,
   return false;
 }
 
+// Sym number associated with R_NANOMIPS_NONE relocation.
+// 0 If none.
+template<int size, bool big_endian>
+static inline unsigned int
+has_none_reloc(typename elfcpp::Elf_types<size>::Elf_Addr offset,
+                        size_t reloc_count,
+                        size_t relnum,
+                        const unsigned char* preloc)
+{
+  typedef typename elfcpp::Rela<size, big_endian> Reltype;
+  const int reloc_size = elfcpp::Elf_sizes<size>::rela_size;
+
+  preloc += reloc_size;
+  for (size_t i = relnum + 1; i < reloc_count; ++i, preloc += reloc_size)
+    {
+      Reltype reloc(preloc);
+      if (offset != reloc.get_r_offset())
+        break;
+
+      unsigned int r_type = elfcpp::elf_r_type<size>(reloc.get_r_info());
+      if (r_type == elfcpp::R_NANOMIPS_NONE)
+        return elfcpp::elf_r_sym<size>(reloc.get_r_info());
+    }
+  return 0;
+}
+
 // Return the GOT offset of the local symbol.  If the symbol does not have
 // a GOT offset, return -1U.
 
@@ -1607,7 +1633,8 @@ class Nanomips_relax_insn : public Nanomips_transformations<size, big_endian>
        size_t relnum,
        uint32_t insn,
        Address address,
-       Address gp);
+       Address gp,
+       bool has_balc_stub2 = false);
 
  protected:
   // Return the type of the relaxation for code and data models.
@@ -1647,7 +1674,8 @@ class Nanomips_relax_insn_finalize
        size_t relnum,
        uint32_t insn,
        Address address,
-       Address gp);
+       Address gp,
+       bool has_balc_stub2 = false);
 };
 
 // The class which implements expansions.
@@ -1679,7 +1707,8 @@ class Nanomips_expand_insn : public Nanomips_transformations<size, big_endian>
        size_t,
        uint32_t insn,
        Address address,
-       Address gp);
+       Address gp,
+       bool has_balc_stub2 = false);
 
  protected:
   // Return the type of the expansion for instruction whose
@@ -1724,7 +1753,8 @@ class Nanomips_expand_insn_finalize
        size_t relnum,
        uint32_t insn,
        Address address,
-       Address gp);
+       Address gp,
+       bool has_balc_stub2 = false);
 };
 
 // The class which implements trampolines.
@@ -1755,7 +1785,8 @@ class Nanomips_trampoline : public Nanomips_transformations<size, big_endian>
        size_t,
        uint32_t insn,
        Address address,
-       Address gp);
+       Address gp,
+       bool has_balc_stub2 = false);
 };
 
 // This class handles .nanoMIPS.abiflags output section.
@@ -5126,7 +5157,8 @@ Nanomips_relax_insn<size, big_endian>::type(
     size_t relnum,
     uint32_t insn,
     Address address,
-    Address gp)
+    Address gp,
+    bool has_balc_stub2)
 {
   const Address invalid_address = static_cast<Address>(0) - 1;
   const Nanomips_relobj<size, big_endian>* relobj =
@@ -5284,7 +5316,8 @@ Nanomips_relax_insn_finalize<size, big_endian>::type(
     size_t relnum,
     uint32_t insn,
     Address address,
-    Address gp)
+    Address gp,
+    bool has_balc_stub2)
 {
   Relocatable_relocs* rr = relinfo->rr;
   gold_assert(rr != NULL);
@@ -5295,7 +5328,7 @@ Nanomips_relax_insn_finalize<size, big_endian>::type(
   return Nanomips_relax_insn<size, big_endian>::type(relinfo, target, gsym,
                                                      psymval, insn_property,
                                                      reloc, relnum, insn,
-                                                     address, gp);
+                                                     address, gp, has_balc_stub2);
 }
 
 // Nanomips_expand_insn methods.
@@ -5500,7 +5533,8 @@ Nanomips_expand_insn<size, big_endian>::type(
     size_t,
     uint32_t insn,
     Address address,
-    Address gp)
+    Address gp,
+    bool has_balc_stub2)
 {
   const Address invalid_address = static_cast<Address>(0) - 1;
   const Nanomips_relobj<size, big_endian>* relobj =
@@ -5625,7 +5659,8 @@ Nanomips_expand_insn_finalize<size, big_endian>::type(
     size_t relnum,
     uint32_t insn,
     Address address,
-    Address gp)
+    Address gp,
+    bool has_balc_stub2)
 {
   Nanomips_relobj<size, big_endian>* relobj =
     Nanomips_relobj<size, big_endian>::as_nanomips_relobj(relinfo->object);
@@ -5653,7 +5688,7 @@ Nanomips_expand_insn_finalize<size, big_endian>::type(
     Nanomips_expand_insn<size, big_endian>::type(relinfo, target, gsym,
                                                  psymval, insn_property,
                                                  reloc, relnum, insn,
-                                                 address, gp);
+                                                 address, gp, has_balc_stub2);
   if (type == TT_NONE)
     return TT_NONE;
 
@@ -5717,11 +5752,12 @@ Nanomips_trampoline<size, big_endian>::type(
     size_t,
     uint32_t insn,
     Address address,
-    Address gp)
+    Address gp,
+    bool has_balc_stub2)
 {
   unsigned int r_type = elfcpp::elf_r_type<size>(reloc.get_r_info());
 
-  if ((r_type != elfcpp::R_NANOMIPS_PC25_S1)
+  if ((r_type != elfcpp::R_NANOMIPS_PC25_S1 || !has_balc_stub2)
       || (strcmp(insn_property->name().c_str(), "balc") != 0))
     return TT_NONE;
 
@@ -7567,6 +7603,17 @@ Target_nanomips<size, big_endian>::scan_reloc_section_for_transform(
                                                   i, prelocs))
         continue;
 
+      unsigned int none_sym = has_none_reloc<size, big_endian>(r_offset,
+                                                               reloc_count,
+                                                               i, prelocs);
+      bool has_balc_stub2 = none_sym >= local_count;
+      if (has_balc_stub2)
+        {
+          const Symbol* gsym = relobj->global_symbol(none_sym);
+          gold_assert(gsym != NULL);
+          has_balc_stub2 = strcmp(gsym->name(), "__reloc_balc_stub_\\2") == 0;
+        }
+
       const Symbol* gsym;
       Symbol_value<size> symval;
       const Symbol_value<size>* psymval;
@@ -7680,7 +7727,7 @@ Target_nanomips<size, big_endian>::scan_reloc_section_for_transform(
       Address address = view_address + r_offset;
       unsigned int type = transform.type(relinfo, this, gsym, psymval,
                                          insn_property, reloc, i, insn,
-                                         address, gp);
+                                         address, gp, has_balc_stub2);
       if (type == TT_NONE)
         continue;
 
