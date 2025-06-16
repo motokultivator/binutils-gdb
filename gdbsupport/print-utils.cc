@@ -212,7 +212,7 @@ phex_nz_ulongest (ULONGEST l, int sizeof_l)
       xsnprintf (str, PRINT_CELL_SIZE, "%x", (unsigned short) (l & 0xff));
       break;
     default:
-      return phex_nz (l);
+      internal_error (_("phex_nz_ulongest: unsupported word width"));
       break;
     }
 
